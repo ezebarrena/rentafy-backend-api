@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,10 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import CORS_ORIGINS
 from .database import BaseFinanciera, BaseNoFinanciera, SessionFinanciera, engine_financiera, engine_no_financiera
 from .routers import auth, calendario, instrumentos, mercado, rankings, watchlist
+from .scheduler import iniciar_scheduler
 from .seed import seed_if_empty
 
 # Se importan explícitamente para que create_all() conozca todas las tablas de cada base.
 from . import models_financiera, models_no_financiera  # noqa: F401
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s: %(message)s")
 
 
 @asynccontextmanager
@@ -21,7 +25,9 @@ async def lifespan(app: FastAPI):
         seed_if_empty(db)
     finally:
         db.close()
+    scheduler = iniciar_scheduler()
     yield
+    scheduler.shutdown()
 
 
 app = FastAPI(
