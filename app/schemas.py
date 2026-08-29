@@ -152,3 +152,5 @@ class IndicadorMercado(BaseModel):
     valor: str
     variacion: str
     tendencia: Literal["positiva", "negativa", "neutral"]
+    enVivo: bool = False
+    detalle: Optional[str] = None  # dato secundario chico, ej. el valor del mes anterior para Inflación
