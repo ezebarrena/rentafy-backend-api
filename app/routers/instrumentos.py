@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..deps import get_db_financiera
-from ..models_financiera import Instrumento
-from ..schemas import InstrumentoOut, PaginatedInstrumentos, PerfilInversor
+from ..models_financiera import Cotizacion, Instrumento
+from ..schemas import InstrumentoOut, PaginatedInstrumentos, PerfilInversor, PuntoHistorico
 from ..serializers import to_detail, to_list_item
 
 router = APIRouter(prefix="/instrumentos", tags=["instrumentos"])
@@ -89,6 +89,19 @@ def emisores_disponibles(db: Session = Depends(get_db_financiera)):
     """Lista de emisores distintos del catálogo, para el filtro avanzado (RF-17)."""
     filas = db.query(Instrumento.emisor).distinct().order_by(Instrumento.emisor).all()
     return [fila[0] for fila in filas]
+
+
+@router.get("/{ticker}/historico", response_model=list[PuntoHistorico])
+def historico_instrumento(ticker: str, db: Session = Depends(get_db_financiera)):
+    """Serie de precios de cierre diarios (RF-07), tal como los fue dejando el job de las
+    18hs (ver scheduler.py). Sin OHLC: ver docstring de PuntoHistorico."""
+    filas = (
+        db.query(Cotizacion)
+        .filter(Cotizacion.instrumento_ticker == ticker.upper())
+        .order_by(Cotizacion.fecha)
+        .all()
+    )
+    return [PuntoHistorico(fecha=f.fecha, precio=f.precio) for f in filas]
 
 
 @router.get("/{ticker}", response_model=InstrumentoOut)

@@ -154,3 +154,12 @@ class IndicadorMercado(BaseModel):
     tendencia: Literal["positiva", "negativa", "neutral"]
     enVivo: bool = False
     detalle: Optional[str] = None  # dato secundario chico, ej. el valor del mes anterior para Inflación
+
+
+class PuntoHistorico(BaseModel):
+    """Un cierre diario real (RF-07). Sin OHLC: la fuente solo se consulta una vez por día
+    (18hs, ver scheduler.py), así que ese único valor es el cierre, no hay apertura/máximo/
+    mínimo intradiario."""
+
+    fecha: date
+    precio: float
