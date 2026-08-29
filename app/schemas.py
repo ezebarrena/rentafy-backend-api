@@ -17,7 +17,7 @@ class FactoresScore(BaseModel):
     rendimiento: Optional[float]
     riesgo: float
     liquidez: float
-    estabilidad: float
+    estabilidad: Optional[float]
     fechaCalculo: date
     modeloId: str
 

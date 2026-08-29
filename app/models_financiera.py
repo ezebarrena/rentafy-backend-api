@@ -98,7 +98,9 @@ class Scoring(BaseFinanciera):
     rendimiento: Mapped[float | None] = mapped_column(Float, nullable=True)
     riesgo: Mapped[float] = mapped_column(Float)
     liquidez: Mapped[float] = mapped_column(Float)
-    estabilidad: Mapped[float] = mapped_column(Float)
+    # Nullable: requiere 20 ruedas de historial de precio (ver Servicio de IA,
+    # app/factores/estabilidad.py) — va a faltar mientras la base acumula ese historial.
+    estabilidad: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     instrumento: Mapped["Instrumento"] = relationship(back_populates="scores")
     modelo: Mapped["Modelo"] = relationship(back_populates="scores")

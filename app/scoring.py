@@ -21,16 +21,18 @@ def compute_score(
     rendimiento: float | None,
     riesgo: float,
     liquidez: float,
-    estabilidad: float,
+    estabilidad: float | None,
     perfil: PerfilInversor,
 ) -> int:
     """Aplica la ponderación del perfil sobre los cuatro factores ya calculados.
 
-    Instrumentos sin Rendimiento calculable (TAMAR, DUAL, dólar-linked) redistribuyen el
-    score entre los tres factores restantes en partes iguales (ver scoring.ts línea 19-30).
+    Instrumentos sin Rendimiento calculable (TAMAR, DUAL, dólar-linked) o sin Estabilidad
+    calculable todavía (menos de 20 ruedas de historial de precio, ver Servicio de IA)
+    redistribuyen el score entre los factores restantes en partes iguales (ver scoring.ts).
     """
-    if rendimiento is None:
-        return round((riesgo + liquidez + estabilidad) / 3)
+    if rendimiento is None or estabilidad is None:
+        presentes = [v for v in (rendimiento, riesgo, liquidez, estabilidad) if v is not None]
+        return round(sum(presentes) / len(presentes))
 
     w = PESOS_PERFIL[perfil]
     score = w.rendimiento * rendimiento + w.riesgo * riesgo + w.liquidez * liquidez + w.estabilidad * estabilidad

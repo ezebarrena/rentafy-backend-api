@@ -30,6 +30,12 @@ from .models_financiera import Cotizacion, FlujoFondo, FuenteDatos, Instrumento,
 BONOS_URL = "https://compararfondos.com.ar/api/bonos"
 PLACEHOLDER_MODELO_ID = "placeholder-aleatorio"
 
+# Rentafy es una plataforma para renta fija ARGENTINA (ver chapter04.tex, alcance del
+# proyecto): la fuente también trae deuda soberana de otros países ("International", ej.
+# México/Uruguay/Perú/Paraguay/Chile/Colombia/Panamá) y letras del Tesoro de EEUU
+# ("Treasury"), que quedan fuera de alcance y no se importan.
+_TIPOS_EXCLUIDOS = {"International", "Treasury"}
+
 # tipo (compararfondos) -> (tipo interno, subtipo)
 _TIPO_MAP: dict[str, tuple[str, str | None]] = {
     "LECAP": ("LECAP", None),
@@ -40,9 +46,7 @@ _TIPO_MAP: dict[str, tuple[str, str | None]] = {
     "TAMAR": ("BONO", "TAMAR"),
     "DL": ("BONO", "Dólar Linked"),
     "FIJA": ("BONO", None),  # subtipo se resuelve por moneda, ver _mapear_tipo
-    "Soberano": ("BONO", None),
-    "International": ("BONO", None),
-    "Treasury": ("BONO", None),
+    "Soberano": ("BONO", None),  # deuda soberana ARGENTINA (ej. AL30, GD30); no confundir con "International"
     "Provincial": ("BONO", None),
 }
 
@@ -52,7 +56,7 @@ _LEY_MAP = {"Argentina": "Ley Argentina", "NY": "Ley Nueva York", "Nueva York": 
 def _mapear_tipo(bond: dict) -> tuple[str, str | None]:
     tipo_raw = bond["tipo"]
     tipo, subtipo = _TIPO_MAP.get(tipo_raw, ("BONO", tipo_raw))
-    if tipo == "BONO" and subtipo is None and tipo_raw in ("FIJA", "Soberano", "International", "Treasury"):
+    if tipo == "BONO" and subtipo is None and tipo_raw in ("FIJA", "Soberano"):
         subtipo = "Bono USD" if bond["moneda"] == "USD" else "Bono ARS"
     return tipo, subtipo
 
@@ -60,11 +64,8 @@ def _mapear_tipo(bond: dict) -> tuple[str, str | None]:
 def _derivar_emisor(bond: dict) -> str:
     """La fuente no expone un campo de emisor estructurado; se aproxima por tipo/país."""
     tipo, moneda = bond["tipo"], bond["moneda"]
-    if tipo in ("Soberano", "Treasury", "FIJA", "CER", "DUAL", "TAMAR", "DL", "LECAP", "BONCAP"):
+    if tipo in ("Soberano", "FIJA", "CER", "DUAL", "TAMAR", "DL", "LECAP", "BONCAP"):
         return "República Argentina" if moneda == "USD" else "Tesoro Nacional"
-    if tipo == "International":
-        pais = bond.get("pais")
-        return f"Gobierno de {pais}" if pais else "Emisor soberano extranjero"
     if tipo == "Provincial":
         return "Gobierno provincial"
     # ON: no hay campo emisor; se aproxima con el primer token del nombre (ej. "CGC 2026 Zero" -> "CGC").
@@ -127,9 +128,14 @@ def importar(db: Session) -> dict:
     con_tir = 0
     con_par_legislacion = 0
     con_score_placeholder = 0
+    excluidos_fuera_de_alcance = 0
     tipos_no_mapeados: set[str] = set()
 
     for bond in bonds:
+        if bond["tipo"] in _TIPOS_EXCLUIDOS:
+            excluidos_fuera_de_alcance += 1
+            continue
+
         ticker = bond["ticker"]
         tipo, subtipo = _mapear_tipo(bond)
         if bond["tipo"] not in _TIPO_MAP:
@@ -226,6 +232,7 @@ def importar(db: Session) -> dict:
     return {
         "procesados": procesados,
         "totalEnFuente": payload.get("count", len(bonds)),
+        "excluidosFueraDeAlcance": excluidos_fuera_de_alcance,
         "conTir": con_tir,
         "conParLegislacion": con_par_legislacion,
         "conScorePlaceholder": con_score_placeholder,
