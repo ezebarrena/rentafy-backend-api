@@ -44,10 +44,12 @@ def to_list_item(instrumento: Instrumento, perfil: PerfilInversor) -> Instrument
         vencimiento=instrumento.vencimiento,
         precio=cot.precio,
         variacion=cot.variacion,
+        volumen=cot.volumen,
         tir=cot.tir,
         tirSufijo=cot.tir_sufijo,
         riesgo=instrumento.riesgo,
         liquidez=instrumento.liquidez,
+        resumen=instrumento.resumen,
         score=_score(sc, perfil),
     )
 

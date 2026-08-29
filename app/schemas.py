@@ -71,10 +71,12 @@ class InstrumentoListItem(BaseModel):
     vencimiento: date
     precio: float
     variacion: float
+    volumen: float = 0
     tir: Optional[float]
     tirSufijo: Optional[str] = None
     riesgo: NivelRiesgo
     liquidez: NivelLiquidez
+    resumen: str = ""
     score: Optional[float] = None
 
 

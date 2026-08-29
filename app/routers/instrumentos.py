@@ -13,7 +13,7 @@ from ..serializers import to_detail, to_list_item
 
 router = APIRouter(prefix="/instrumentos", tags=["instrumentos"])
 
-SortKey = Literal["ticker", "score", "tir", "vencimiento", "variacion", "riesgo", "liquidez"]
+SortKey = Literal["ticker", "score", "tir", "vencimiento", "variacion", "riesgo", "liquidez", "volumen"]
 
 _RIESGO_ORDEN = {"Bajo": 0, "Medio": 1, "Alto": 2}
 _LIQUIDEZ_ORDEN = {"Baja": 0, "Media": 1, "Alta": 2}
@@ -71,6 +71,8 @@ def listar_instrumentos(
             return _RIESGO_ORDEN.get(item.riesgo, -1)
         if sort == "liquidez":
             return _LIQUIDEZ_ORDEN.get(item.liquidez, -1)
+        if sort == "volumen":
+            return item.volumen
         return item.ticker
 
     items.sort(key=sort_key, reverse=(direction == "desc"))

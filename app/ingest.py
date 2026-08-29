@@ -10,20 +10,25 @@ directa y que este mapeo resuelve mediante una heurística (ver `_derivar_emisor
 `_derivar_riesgo`, `_derivar_liquidez`): no reemplazan al Servicio de IA ni a información real
 de riesgo crediticio, son solo un valor de exhibición hasta contar con esas fuentes.
 
-No se persiste SCORING para los instrumentos importados por esta vía: los 4 factores del Score
-(rendimiento, riesgo, liquidez, estabilidad) son responsabilidad del Servicio de IA, que no se
-implementa en este backend (ver README, "Alcance de este backend"). El resto de la plataforma
-ya tolera esta ausencia (ver serializers.py, RNF-29).
+Los 4 factores del Score (rendimiento, riesgo, liquidez, estabilidad) son responsabilidad del
+Servicio de IA, que no se implementa en este backend (ver README, "Alcance de este backend").
+El resto de la plataforma tolera su ausencia (ver serializers.py, RNF-29), pero para poder
+probar Rankings/Dashboard con el catálogo completo se le asigna a cada instrumento importado
+que todavía no tenga Scoring un valor aleatorio-pero-estático (sembrado por ticker, así no
+cambia entre corridas) bajo un Modelo separado y marcado `activo=False`, para que quede
+identificable como placeholder de prueba y nunca se confunda con el Modelo real (v1.4.0).
 """
 
+import random
 from datetime import date, datetime
 
 import requests
 from sqlalchemy.orm import Session
 
-from .models import Cotizacion, FlujoFondo, FuenteDatos, Instrumento
+from .models import Cotizacion, FlujoFondo, FuenteDatos, Instrumento, Modelo, Scoring
 
 BONOS_URL = "https://compararfondos.com.ar/api/bonos"
+PLACEHOLDER_MODELO_ID = "placeholder-aleatorio"
 
 # tipo (compararfondos) -> (tipo interno, subtipo)
 _TIPO_MAP: dict[str, tuple[str, str | None]] = {
@@ -97,6 +102,18 @@ def _parse_fecha(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
 
 
+def _score_aleatorio_estatico(ticker: str) -> tuple[float, float, float, float]:
+    """Placeholder de prueba: sembrado por ticker, así da siempre el mismo valor para un mismo
+    instrumento (no cambia entre corridas), pero no responde a ningún análisis real."""
+    rng = random.Random(ticker)
+    return tuple(round(rng.uniform(30, 95), 1) for _ in range(4))  # type: ignore[return-value]
+
+
+def _asegurar_modelo_placeholder(db: Session) -> None:
+    if db.get(Modelo, PLACEHOLDER_MODELO_ID) is None:
+        db.add(Modelo(id=PLACEHOLDER_MODELO_ID, publicado_en=date.today(), activo=False))
+
+
 def importar(db: Session) -> dict:
     response = requests.get(BONOS_URL, timeout=10)
     response.raise_for_status()
@@ -104,9 +121,12 @@ def importar(db: Session) -> dict:
     bonds = payload["bonds"]
     hoy = date.today()
 
+    _asegurar_modelo_placeholder(db)
+
     procesados = 0
     con_tir = 0
     con_par_legislacion = 0
+    con_score_placeholder = 0
     tipos_no_mapeados: set[str] = set()
 
     for bond in bonds:
@@ -172,6 +192,23 @@ def importar(db: Session) -> dict:
                 )
             )
 
+        # Placeholder de prueba: solo si el instrumento todavía no tiene ningún Scoring (nunca
+        # pisa un Scoring real, como el de los 19 instrumentos del seed original).
+        if not db.query(Scoring).filter(Scoring.instrumento_ticker == ticker).first():
+            rendimiento, riesgo, liquidez, estabilidad = _score_aleatorio_estatico(ticker)
+            db.add(
+                Scoring(
+                    instrumento_ticker=ticker,
+                    modelo_id=PLACEHOLDER_MODELO_ID,
+                    fecha_calculo=hoy,
+                    rendimiento=rendimiento,
+                    riesgo=riesgo,
+                    liquidez=liquidez,
+                    estabilidad=estabilidad,
+                )
+            )
+            con_score_placeholder += 1
+
         procesados += 1
         if bond.get("tir") is not None:
             con_tir += 1
@@ -191,5 +228,6 @@ def importar(db: Session) -> dict:
         "totalEnFuente": payload.get("count", len(bonds)),
         "conTir": con_tir,
         "conParLegislacion": con_par_legislacion,
+        "conScorePlaceholder": con_score_placeholder,
         "tiposNoMapeadosExplicitamente": sorted(tipos_no_mapeados),
     }
