@@ -38,12 +38,11 @@ def compute_score(
 
 
 def score_label(score: float) -> str:
+    """Misma escala de 4 tramos que el frontend (90/75/50, ver ScoreBadge.tsx)."""
     if score >= 90:
         return "Excelente"
     if score >= 75:
         return "Muy bueno"
-    if score >= 60:
+    if score >= 50:
         return "Bueno"
-    if score >= 40:
-        return "Moderado"
-    return "Débil"
+    return "Regular"
