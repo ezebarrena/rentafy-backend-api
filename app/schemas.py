@@ -59,6 +59,17 @@ class InstrumentoOut(BaseModel):
     score: Optional[float] = Field(default=None, description="Score ya ponderado según el perfil solicitado")
 
 
+class InstrumentoOpcion(BaseModel):
+    """Versión mínima para selectores (Comparador, Calculadora): sin cotización ni score,
+    para poder listar el catálogo completo sin paginar."""
+
+    ticker: str
+    nombre: str
+    tipo: TipoInstrumento
+    subtipo: Optional[str] = None
+    moneda: Moneda
+
+
 class InstrumentoListItem(BaseModel):
     """Versión liviana usada en listados/rankings (sin flujos)."""
 

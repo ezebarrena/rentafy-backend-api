@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..deps import get_db_financiera
 from ..models_financiera import Cotizacion, Instrumento
-from ..schemas import InstrumentoOut, PaginatedInstrumentos, PerfilInversor, PuntoHistorico
+from ..schemas import InstrumentoOpcion, InstrumentoOut, PaginatedInstrumentos, PerfilInversor, PuntoHistorico
 from ..serializers import to_detail, to_list_item
 
 router = APIRouter(prefix="/instrumentos", tags=["instrumentos"])
@@ -89,6 +89,18 @@ def emisores_disponibles(db: Session = Depends(get_db_financiera)):
     """Lista de emisores distintos del catálogo, para el filtro avanzado (RF-17)."""
     filas = db.query(Instrumento.emisor).distinct().order_by(Instrumento.emisor).all()
     return [fila[0] for fila in filas]
+
+
+@router.get("/opciones", response_model=list[InstrumentoOpcion])
+def opciones_instrumentos(db: Session = Depends(get_db_financiera)):
+    """Catálogo completo sin paginar, para selectores (Comparador, Calculadora)."""
+    instrumentos = db.query(Instrumento).order_by(Instrumento.ticker).all()
+    return [
+        InstrumentoOpcion(
+            ticker=i.ticker, nombre=i.nombre, tipo=i.tipo, subtipo=i.subtipo, moneda=i.moneda
+        )
+        for i in instrumentos
+    ]
 
 
 @router.get("/{ticker}/historico", response_model=list[PuntoHistorico])
