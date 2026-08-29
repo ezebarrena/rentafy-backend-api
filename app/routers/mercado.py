@@ -9,8 +9,11 @@ endpoint público estable durante esta sesión, y por ahora esos datos los prove
 """
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
+from ..deps import get_db
+from ..ingest import importar as importar_compararfondos
 from ..schemas import IndicadorMercado
 
 router = APIRouter(prefix="/mercado", tags=["mercado"])
@@ -48,6 +51,19 @@ def _dolar_ccl_mep() -> dict[str, dict]:
         return {"valor": ultimo["venta"], "variacion": variacion}
 
     return {"ccl": ultimo_y_variacion("contadoconliqui"), "mep": ultimo_y_variacion("bolsa")}
+
+
+@router.post("/importar/compararfondos")
+def importar_bonos_compararfondos(db: Session = Depends(get_db)):
+    """Dispara la importación en vivo desde compararfondos.com.ar (RF-07/RF-08).
+
+    En producción esto correría como un job periódico (ver RNF-05, "procesamiento
+    asincrónico"); acá es un endpoint disparado manualmente para poder probarlo.
+    """
+    try:
+        return importar_compararfondos(db)
+    except requests.RequestException as exc:
+        raise HTTPException(502, f"Fuente externa (compararfondos.com.ar) no disponible: {exc}") from exc
 
 
 @router.get("/indicadores", response_model=list[IndicadorMercado])

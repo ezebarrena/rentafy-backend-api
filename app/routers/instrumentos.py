@@ -51,7 +51,7 @@ def listar_instrumentos(
             i for i in instrumentos if query in i.ticker.lower() or query in i.nombre.lower()
         ]
 
-    items = [to_list_item(i, perfil) for i in instrumentos]
+    items = [item for item in (to_list_item(i, perfil) for i in instrumentos) if item is not None]
 
     if tir_min is not None:
         items = [i for i in items if i.tir is not None and i.tir >= tir_min]
@@ -60,7 +60,7 @@ def listar_instrumentos(
 
     def sort_key(item):
         if sort == "score":
-            return item.score
+            return item.score if item.score is not None else float("-inf")
         if sort == "tir":
             return item.tir if item.tir is not None else float("-inf")
         if sort == "vencimiento":
@@ -89,4 +89,7 @@ def detalle_instrumento(
     instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker.upper()).first()
     if instrumento is None:
         raise HTTPException(404, f"No se encontró el instrumento «{ticker}»")
-    return to_detail(instrumento, perfil)
+    detalle = to_detail(instrumento, perfil)
+    if detalle is None:
+        raise HTTPException(409, f"El instrumento «{ticker}» todavía no tiene una cotización cargada")
+    return detalle

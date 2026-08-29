@@ -19,7 +19,7 @@ def obtener_watchlist(
 ):
     tickers = [f.instrumento_ticker for f in usuario.favoritos]
     instrumentos = db.query(Instrumento).filter(Instrumento.ticker.in_(tickers)).all()
-    return [to_list_item(i, perfil) for i in instrumentos]
+    return [item for item in (to_list_item(i, perfil) for i in instrumentos) if item is not None]
 
 
 @router.post("/{ticker}", status_code=204)

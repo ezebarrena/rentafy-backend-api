@@ -51,9 +51,11 @@ class InstrumentoOut(BaseModel):
     riesgo: NivelRiesgo
     liquidez: NivelLiquidez
     precioStale: bool = False
-    factores: FactoresScore
+    factores: Optional[FactoresScore] = Field(
+        default=None, description="Null cuando el instrumento todavía no tiene Scoring calculado (RNF-29)"
+    )
     flujos: list[FlujoFondo]
-    resumen: str
+    resumen: str = ""
     score: Optional[float] = Field(default=None, description="Score ya ponderado según el perfil solicitado")
 
 
@@ -73,7 +75,7 @@ class InstrumentoListItem(BaseModel):
     tirSufijo: Optional[str] = None
     riesgo: NivelRiesgo
     liquidez: NivelLiquidez
-    score: float
+    score: Optional[float] = None
 
 
 class PaginatedInstrumentos(BaseModel):

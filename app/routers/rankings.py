@@ -31,8 +31,8 @@ def ranking(
     if tipo and tipo != "TODOS":
         instrumentos = [i for i in instrumentos if i.tipo == tipo]
 
-    items = [to_list_item(i, perfil) for i in instrumentos]
-    items.sort(key=lambda i: i.score, reverse=True)
+    items = [item for item in (to_list_item(i, perfil) for i in instrumentos) if item is not None]
+    items.sort(key=lambda i: i.score if i.score is not None else float("-inf"), reverse=True)
 
     total = len(items)
     start = (page - 1) * page_size
