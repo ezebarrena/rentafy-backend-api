@@ -82,6 +82,13 @@ def listar_instrumentos(
     return PaginatedInstrumentos(items=page_items, total=total, page=page, pageSize=page_size)
 
 
+@router.get("/emisores", response_model=list[str])
+def emisores_disponibles(db: Session = Depends(get_db)):
+    """Lista de emisores distintos del catálogo, para el filtro avanzado (RF-17)."""
+    filas = db.query(Instrumento.emisor).distinct().order_by(Instrumento.emisor).all()
+    return [fila[0] for fila in filas]
+
+
 @router.get("/{ticker}", response_model=InstrumentoOut)
 def detalle_instrumento(
     ticker: str, db: Session = Depends(get_db), perfil: PerfilInversor = Query("moderado")
