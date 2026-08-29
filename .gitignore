@@ -19,3 +19,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Base de datos local (SQLite)
+*.db
