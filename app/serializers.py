@@ -6,7 +6,7 @@ instrumento recién importado desde una fuente de mercado (ver ingest.py) tiene 
 pero todavía no tiene Scoring calculado, dado que ese cálculo es responsabilidad de un
 componente separado (el Servicio de IA, fuera del alcance de este backend)."""
 
-from .models import Instrumento
+from .models_financiera import Instrumento
 from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, PerfilInversor
 from .scoring import compute_score
 

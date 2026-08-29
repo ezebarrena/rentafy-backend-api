@@ -6,8 +6,8 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
-from ..models import Instrumento
+from ..deps import get_db_financiera
+from ..models_financiera import Instrumento
 from ..schemas import InstrumentoOut, PaginatedInstrumentos, PerfilInversor
 from ..serializers import to_detail, to_list_item
 
@@ -21,7 +21,7 @@ _LIQUIDEZ_ORDEN = {"Baja": 0, "Media": 1, "Alta": 2}
 
 @router.get("", response_model=PaginatedInstrumentos)
 def listar_instrumentos(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_financiera),
     perfil: PerfilInversor = Query("moderado"),
     tipo: Optional[str] = None,
     moneda: Optional[str] = None,
@@ -85,7 +85,7 @@ def listar_instrumentos(
 
 
 @router.get("/emisores", response_model=list[str])
-def emisores_disponibles(db: Session = Depends(get_db)):
+def emisores_disponibles(db: Session = Depends(get_db_financiera)):
     """Lista de emisores distintos del catálogo, para el filtro avanzado (RF-17)."""
     filas = db.query(Instrumento.emisor).distinct().order_by(Instrumento.emisor).all()
     return [fila[0] for fila in filas]
@@ -93,7 +93,7 @@ def emisores_disponibles(db: Session = Depends(get_db)):
 
 @router.get("/{ticker}", response_model=InstrumentoOut)
 def detalle_instrumento(
-    ticker: str, db: Session = Depends(get_db), perfil: PerfilInversor = Query("moderado")
+    ticker: str, db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")
 ):
     instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker.upper()).first()
     if instrumento is None:

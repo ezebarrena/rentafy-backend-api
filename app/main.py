@@ -4,15 +4,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS
-from .database import Base, SessionLocal, engine
+from .database import BaseFinanciera, BaseNoFinanciera, SessionFinanciera, engine_financiera, engine_no_financiera
 from .routers import auth, calendario, instrumentos, mercado, rankings, watchlist
 from .seed import seed_if_empty
+
+# Se importan explícitamente para que create_all() conozca todas las tablas de cada base.
+from . import models_financiera, models_no_financiera  # noqa: F401
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+    BaseFinanciera.metadata.create_all(bind=engine_financiera)
+    BaseNoFinanciera.metadata.create_all(bind=engine_no_financiera)
+    db = SessionFinanciera()
     try:
         seed_if_empty(db)
     finally:

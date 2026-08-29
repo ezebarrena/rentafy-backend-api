@@ -25,7 +25,7 @@ from datetime import date, datetime
 import requests
 from sqlalchemy.orm import Session
 
-from .models import Cotizacion, FlujoFondo, FuenteDatos, Instrumento, Modelo, Scoring
+from .models_financiera import Cotizacion, FlujoFondo, FuenteDatos, Instrumento, Modelo, Scoring
 
 BONOS_URL = "https://compararfondos.com.ar/api/bonos"
 PLACEHOLDER_MODELO_ID = "placeholder-aleatorio"

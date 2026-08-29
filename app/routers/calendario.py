@@ -6,8 +6,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
-from ..models import FlujoFondo, Instrumento
+from ..deps import get_db_financiera
+from ..models_financiera import FlujoFondo, Instrumento
 from ..schemas import EventoCalendario
 
 router = APIRouter(prefix="/calendario", tags=["calendario"])
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/calendario", tags=["calendario"])
 
 @router.get("", response_model=list[EventoCalendario])
 def eventos_calendario(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_financiera),
     desde: Optional[date] = None,
     hasta: Optional[date] = None,
 ):

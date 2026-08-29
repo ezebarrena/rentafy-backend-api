@@ -12,7 +12,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from .cashflows import build_flujos
-from .models import Cotizacion, FlujoFondo, FuenteDatos, Instrumento, Modelo, PesoPerfil, Scoring
+from .models_financiera import Cotizacion, FlujoFondo, FuenteDatos, Instrumento, Modelo, PesoPerfil, Scoring
 from .scoring import PESOS_PERFIL
 
 MODELO_ID = "v1.4.0"

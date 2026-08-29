@@ -3,8 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ..deps import get_current_user, get_db
-from ..models import PerfilInversorHistorial, Usuario
+from ..deps import get_current_user, get_db_no_financiera
+from ..models_no_financiera import PerfilInversorHistorial, Usuario
 from ..schemas import PerfilInversorUpdate, TokenOut, UsuarioLogin, UsuarioOut, UsuarioRegistro
 from ..security import create_access_token, hash_password, verify_password
 
@@ -28,7 +28,7 @@ def _to_out(usuario: Usuario) -> UsuarioOut:
 
 
 @router.post("/registro", response_model=UsuarioOut, status_code=status.HTTP_201_CREATED)
-def registrar(datos: UsuarioRegistro, db: Session = Depends(get_db)):
+def registrar(datos: UsuarioRegistro, db: Session = Depends(get_db_no_financiera)):
     if db.query(Usuario).filter(Usuario.email == datos.email).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "Ya existe una cuenta con ese correo electrónico")
 
@@ -49,7 +49,7 @@ def registrar(datos: UsuarioRegistro, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenOut)
-def login(datos: UsuarioLogin, db: Session = Depends(get_db)):
+def login(datos: UsuarioLogin, db: Session = Depends(get_db_no_financiera)):
     usuario = db.query(Usuario).filter(Usuario.email == datos.email).first()
     if usuario is None or not verify_password(datos.password, usuario.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Correo electrónico o contraseña inválidos")
@@ -63,7 +63,7 @@ def me(usuario: Usuario = Depends(get_current_user)):
 
 @router.put("/me/perfil-inversor", response_model=UsuarioOut)
 def actualizar_perfil_inversor(
-    datos: PerfilInversorUpdate, usuario: Usuario = Depends(get_current_user), db: Session = Depends(get_db)
+    datos: PerfilInversorUpdate, usuario: Usuario = Depends(get_current_user), db: Session = Depends(get_db_no_financiera)
 ):
     db.add(PerfilInversorHistorial(usuario_id=usuario.id, perfil=datos.perfil))
     db.commit()

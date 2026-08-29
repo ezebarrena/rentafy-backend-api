@@ -12,7 +12,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
+from ..deps import get_db_financiera
 from ..ingest import importar as importar_compararfondos
 from ..schemas import IndicadorMercado
 
@@ -54,7 +54,7 @@ def _dolar_ccl_mep() -> dict[str, dict]:
 
 
 @router.post("/importar/compararfondos")
-def importar_bonos_compararfondos(db: Session = Depends(get_db)):
+def importar_bonos_compararfondos(db: Session = Depends(get_db_financiera)):
     """Dispara la importación en vivo desde compararfondos.com.ar (RF-07/RF-08).
 
     En producción esto correría como un job periódico (ver RNF-05, "procesamiento

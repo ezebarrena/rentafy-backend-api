@@ -9,8 +9,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
-from ..models import Instrumento
+from ..deps import get_db_financiera
+from ..models_financiera import Instrumento
 from ..schemas import PaginatedInstrumentos, PerfilInversor, ScoreRentafyPesosOut
 from ..scoring import PESOS_PERFIL
 from ..serializers import to_list_item
@@ -20,7 +20,7 @@ router = APIRouter(tags=["rankings"])
 
 @router.get("/rankings", response_model=PaginatedInstrumentos)
 def ranking(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_financiera),
     perfil: PerfilInversor = Query("moderado"),
     moneda: str = Query("ARS"),
     tipo: Optional[str] = None,
@@ -42,9 +42,9 @@ def ranking(
 
 
 @router.get("/score-rentafy/pesos", response_model=ScoreRentafyPesosOut)
-def pesos_por_perfil(db: Session = Depends(get_db)):
+def pesos_por_perfil(db: Session = Depends(get_db_financiera)):
     """RF-34: pesos vigentes por perfil, usados por la página "¿Qué es el Score Rentafy?"."""
-    from ..models import Modelo
+    from ..models_financiera import Modelo
 
     modelo_activo = db.query(Modelo).filter(Modelo.activo == True).first()  # noqa: E712
     modelo_id = modelo_activo.id if modelo_activo else "v1.4.0"
