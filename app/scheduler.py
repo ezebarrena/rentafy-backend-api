@@ -51,7 +51,10 @@ def iniciar_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=ZONA_HORARIA_MERCADO)
     scheduler.add_job(
         _actualizar_catalogo,
-        trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=0),
+        # day_of_week="mon-fri": el mercado argentino no opera fines de semana, así que no hay
+        # cotización nueva que traer — sin esto el job corría también sábado y domingo,
+        # insertando una fila con el precio (stale) del viernes bajo la fecha del fin de semana.
+        trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=0, day_of_week="mon-fri"),
         id="actualizar_compararfondos_diario",
         name=f"Actualización diaria del catálogo (compararfondos.com.ar, {HORA_ACTUALIZACION}:00 ART)",
         replace_existing=True,
