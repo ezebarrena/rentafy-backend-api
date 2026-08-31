@@ -27,7 +27,11 @@ def ranking(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
 ):
-    instrumentos = db.query(Instrumento).filter(Instrumento.moneda == moneda).all()
+    instrumentos = (
+        db.query(Instrumento)
+        .filter(Instrumento.moneda == moneda, Instrumento.activo.is_(True))
+        .all()
+    )
     if tipo and tipo != "TODOS":
         instrumentos = [i for i in instrumentos if i.tipo == tipo]
 

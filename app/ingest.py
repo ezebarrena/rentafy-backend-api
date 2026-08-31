@@ -115,6 +115,46 @@ def _asegurar_modelo_placeholder(db: Session) -> None:
         db.add(Modelo(id=PLACEHOLDER_MODELO_ID, publicado_en=date.today(), activo=False))
 
 
+UMBRAL_CORRIDAS_AUSENTE = 5
+
+
+def _marcar_ausentes_como_inactivos(db: Session) -> int:
+    """Marca `activo=False` para cualquier instrumento que no haya aparecido en las últimas
+    `UMBRAL_CORRIDAS_AUSENTE` corridas reales de importación (bono vencido, delisted de la
+    fuente, etc.) — en vez de dejarlo mostrando un precio cada vez más viejo para siempre, tal
+    como ya venía pasando con instrumentos que la fuente dejó de reportar (ver limpieza manual
+    de instrumentos "huérfanos" documentada en el historial del proyecto).
+
+    Cuenta CORRIDAS reales (fechas distintas con al menos una cotización en toda la base), no
+    días de calendario — evita marcar de más solo porque hubo un fin de semana o el proceso
+    estuvo caído. Si todavía no hay `UMBRAL_CORRIDAS_AUSENTE` corridas registradas, no marca
+    nada: no hay suficiente historia para que la ausencia sea una señal confiable todavía.
+    """
+    fechas_recientes = [
+        fila[0]
+        for fila in db.query(Cotizacion.fecha).distinct().order_by(Cotizacion.fecha.desc()).limit(
+            UMBRAL_CORRIDAS_AUSENTE
+        )
+    ]
+    if len(fechas_recientes) < UMBRAL_CORRIDAS_AUSENTE:
+        return 0
+
+    tickers_presentes = {
+        fila[0]
+        for fila in db.query(Cotizacion.instrumento_ticker)
+        .filter(Cotizacion.fecha.in_(fechas_recientes))
+        .distinct()
+    }
+
+    activos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
+    marcados = 0
+    for instrumento in activos:
+        if instrumento.ticker not in tickers_presentes:
+            instrumento.activo = False
+            marcados += 1
+    return marcados
+
+
 def importar(db: Session) -> dict:
     response = requests.get(BONOS_URL, timeout=10)
     response.raise_for_status()
@@ -161,6 +201,7 @@ def importar(db: Session) -> dict:
         instrumento.riesgo = _derivar_riesgo(duration, plazo_residual)
         instrumento.liquidez = _derivar_liquidez(bond.get("operaciones") or 0)
         instrumento.resumen = instrumento.resumen or ""
+        instrumento.activo = True  # reaparecer en la fuente reactiva un instrumento inactivo
 
         # Reemplaza la cotización del día (idempotente si se corre más de una vez en la jornada).
         db.query(Cotizacion).filter(
@@ -227,6 +268,8 @@ def importar(db: Session) -> dict:
         db.add(fuente)
     fuente.ultima_actualizacion = datetime.utcnow()
 
+    marcados_inactivos = _marcar_ausentes_como_inactivos(db)
+
     db.commit()
 
     return {
@@ -236,5 +279,6 @@ def importar(db: Session) -> dict:
         "conTir": con_tir,
         "conParLegislacion": con_par_legislacion,
         "conScorePlaceholder": con_score_placeholder,
+        "marcadosInactivos": marcados_inactivos,
         "tiposNoMapeadosExplicitamente": sorted(tipos_no_mapeados),
     }

@@ -28,6 +28,12 @@ class Instrumento(BaseFinanciera):
     riesgo: Mapped[str] = mapped_column(String(10))  # Bajo | Medio | Alto
     liquidez: Mapped[str] = mapped_column(String(10))  # Alta | Media | Baja
     resumen: Mapped[str] = mapped_column(String(500), default="")
+    # False cuando el instrumento deja de aparecer varias corridas seguidas de la importación
+    # real (vencido, delisted, etc. — ver ingest.py:_marcar_ausentes_como_inactivos). Los
+    # listados principales (GET /instrumentos, /rankings) lo excluyen por defecto en vez de
+    # seguir mostrando un precio cada vez más viejo sin avisar; el detalle sigue siendo
+    # accesible (ej. para quien lo tenga en watchlist).
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
 
     cotizaciones: Mapped[list["Cotizacion"]] = relationship(
         back_populates="instrumento", cascade="all, delete-orphan"

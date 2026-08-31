@@ -35,7 +35,11 @@ def listar_instrumentos(
     page: int = Query(1, ge=1),
     page_size: int = Query(15, ge=1, le=100),
 ):
-    instrumentos = db.query(Instrumento).all()
+    # activo=False: la fuente dejó de reportar el instrumento varias corridas seguidas (bono
+    # vencido, delisted, etc. — ver ingest.py:_marcar_ausentes_como_inactivos). Se excluye de
+    # los listados para no seguir mostrando un precio cada vez más viejo; el detalle
+    # (GET /instrumentos/{ticker}) lo sigue sirviendo igual, por si alguien lo tiene en watchlist.
+    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
 
     if tipo and tipo != "TODOS":
         instrumentos = [i for i in instrumentos if i.tipo == tipo]
@@ -87,14 +91,22 @@ def listar_instrumentos(
 @router.get("/emisores", response_model=list[str])
 def emisores_disponibles(db: Session = Depends(get_db_financiera)):
     """Lista de emisores distintos del catálogo, para el filtro avanzado (RF-17)."""
-    filas = db.query(Instrumento.emisor).distinct().order_by(Instrumento.emisor).all()
+    filas = (
+        db.query(Instrumento.emisor)
+        .filter(Instrumento.activo.is_(True))
+        .distinct()
+        .order_by(Instrumento.emisor)
+        .all()
+    )
     return [fila[0] for fila in filas]
 
 
 @router.get("/opciones", response_model=list[InstrumentoOpcion])
 def opciones_instrumentos(db: Session = Depends(get_db_financiera)):
     """Catálogo completo sin paginar, para selectores (Comparador, Calculadora)."""
-    instrumentos = db.query(Instrumento).order_by(Instrumento.ticker).all()
+    instrumentos = (
+        db.query(Instrumento).filter(Instrumento.activo.is_(True)).order_by(Instrumento.ticker).all()
+    )
     return [
         InstrumentoOpcion(
             ticker=i.ticker, nombre=i.nombre, tipo=i.tipo, subtipo=i.subtipo, moneda=i.moneda
