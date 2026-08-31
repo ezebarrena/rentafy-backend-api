@@ -107,6 +107,12 @@ class Scoring(BaseFinanciera):
     # Nullable: requiere 20 ruedas de historial de precio (ver Servicio de IA,
     # app/factores/estabilidad.py) — va a faltar mientras la base acumula ese historial.
     estabilidad: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Justificación en texto de cada factor (ver rentafy-servicioIA/app/perfiles/
+    # justificaciones.py) — el backend solo lee y expone estas columnas, no las calcula.
+    rendimiento_detalle: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    riesgo_detalle: Mapped[str] = mapped_column(String(300), default="")
+    liquidez_detalle: Mapped[str] = mapped_column(String(300), default="")
+    estabilidad_detalle: Mapped[str] = mapped_column(String(300), default="")
 
     instrumento: Mapped["Instrumento"] = relationship(back_populates="scores")
     modelo: Mapped["Modelo"] = relationship(back_populates="scores")

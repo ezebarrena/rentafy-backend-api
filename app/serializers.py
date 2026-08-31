@@ -100,6 +100,10 @@ def to_detail(
                 riesgo=sc.riesgo,
                 liquidez=sc.liquidez,
                 estabilidad=sc.estabilidad,
+                rendimientoDetalle=sc.rendimiento_detalle,
+                riesgoDetalle=sc.riesgo_detalle,
+                liquidezDetalle=sc.liquidez_detalle,
+                estabilidadDetalle=sc.estabilidad_detalle,
                 fechaCalculo=sc.fecha_calculo,
                 modeloId=sc.modelo_id,
             )

@@ -18,6 +18,12 @@ class FactoresScore(BaseModel):
     riesgo: float
     liquidez: float
     estabilidad: Optional[float]
+    # Justificación en texto de cada factor (ver rentafy-servicioIA/app/perfiles/
+    # justificaciones.py), para el detalle debajo de cada mini-tarjeta de factor.
+    rendimientoDetalle: Optional[str] = None
+    riesgoDetalle: str = ""
+    liquidezDetalle: str = ""
+    estabilidadDetalle: str = ""
     fechaCalculo: date
     modeloId: str
 
