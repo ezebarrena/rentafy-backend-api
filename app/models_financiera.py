@@ -134,3 +134,33 @@ class FuenteDatos(BaseFinanciera):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(100))
     ultima_actualizacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class IndicadorMacro(BaseFinanciera):
+    """Cache de indicadores macro externos de valor único (ej. inflación esperada REM del
+    BCRA), actualizado por el job diario (ver financial_utils.py) para no pegarle a la API
+    externa en cada request de detalle de instrumento. Una fila por indicador, sobrescrita en
+    cada actualización — no se versiona histórico acá, solo el último valor vigente."""
+
+    __tablename__ = "indicadores_macro"
+
+    nombre: Mapped[str] = mapped_column(String(50), primary_key=True)
+    valor: Mapped[float] = mapped_column(Float)
+    fecha: Mapped[date] = mapped_column(Date)
+
+
+class IndicadorMercadoCache(BaseFinanciera):
+    """Cache de las tarjetas de indicadores del Dashboard que antes se resolvían en vivo en
+    cada GET /mercado/indicadores (Riesgo País, Dólar CCL/MEP — ver financial_utils.py):
+    ya vienen formateadas para mostrar directamente (a diferencia de IndicadorMacro, que
+    guarda un escalar crudo para usar en cálculos). Actualizado por el job diario de las
+    18:05; el endpoint solo lee esta tabla."""
+
+    __tablename__ = "indicadores_mercado_cache"
+
+    label: Mapped[str] = mapped_column(String(50), primary_key=True)
+    valor: Mapped[str] = mapped_column(String(50))
+    variacion: Mapped[str] = mapped_column(String(50))
+    tendencia: Mapped[str] = mapped_column(String(10))  # positiva | negativa | neutral
+    detalle: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    fecha: Mapped[date] = mapped_column(Date)

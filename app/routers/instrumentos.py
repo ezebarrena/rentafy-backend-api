@@ -6,6 +6,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ..financial_utils import obtener_rem_inflacion
 from ..deps import get_db_financiera
 from ..models_financiera import Cotizacion, Instrumento
 from ..schemas import InstrumentoOpcion, InstrumentoOut, PaginatedInstrumentos, PerfilInversor, PuntoHistorico
@@ -24,6 +25,7 @@ def listar_instrumentos(
     db: Session = Depends(get_db_financiera),
     perfil: PerfilInversor = Query("moderado"),
     tipo: Optional[str] = None,
+    subtipo: Optional[str] = None,
     moneda: Optional[str] = None,
     riesgo: Optional[str] = None,
     emisor: Optional[str] = None,
@@ -43,6 +45,8 @@ def listar_instrumentos(
 
     if tipo and tipo != "TODOS":
         instrumentos = [i for i in instrumentos if i.tipo == tipo]
+    if subtipo and subtipo != "TODOS":
+        instrumentos = [i for i in instrumentos if i.subtipo == subtipo]
     if moneda:
         instrumentos = [i for i in instrumentos if i.moneda == moneda]
     if riesgo and riesgo != "TODOS":
@@ -101,6 +105,19 @@ def emisores_disponibles(db: Session = Depends(get_db_financiera)):
     return [fila[0] for fila in filas]
 
 
+@router.get("/subtipos", response_model=list[str])
+def subtipos_disponibles(db: Session = Depends(get_db_financiera), tipo: Optional[str] = None):
+    """Subtipos distintos del catálogo (ej. BONCER, TAMAR, DUAL, Dólar Linked, Bono ARS/USD
+    dentro de tipo=BONO — ver ingest.py:_TIPO_MAP), para el filtro avanzado de "Más filtros"
+    cuando ya se eligió un tipo. Solo BONO tiene subtipos hoy, pero no se hardcodea ese
+    supuesto acá — se filtra por lo que realmente haya en el catálogo."""
+    query = db.query(Instrumento.subtipo).filter(Instrumento.activo.is_(True), Instrumento.subtipo.isnot(None))
+    if tipo and tipo != "TODOS":
+        query = query.filter(Instrumento.tipo == tipo)
+    filas = query.distinct().order_by(Instrumento.subtipo).all()
+    return [fila[0] for fila in filas]
+
+
 @router.get("/opciones", response_model=list[InstrumentoOpcion])
 def opciones_instrumentos(db: Session = Depends(get_db_financiera)):
     """Catálogo completo sin paginar, para selectores (Comparador, Calculadora)."""
@@ -135,7 +152,8 @@ def detalle_instrumento(
     instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker.upper()).first()
     if instrumento is None:
         raise HTTPException(404, f"No se encontró el instrumento «{ticker}»")
-    detalle = to_detail(instrumento, perfil)
+    rem_inflacion_12m = obtener_rem_inflacion(db) if instrumento.subtipo == "BONCER" else None
+    detalle = to_detail(instrumento, perfil, rem_inflacion_12m)
     if detalle is None:
         raise HTTPException(409, f"El instrumento «{ticker}» todavía no tiene una cotización cargada")
     return detalle

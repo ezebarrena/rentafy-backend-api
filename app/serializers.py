@@ -54,7 +54,18 @@ def to_list_item(instrumento: Instrumento, perfil: PerfilInversor) -> Instrument
     )
 
 
-def to_detail(instrumento: Instrumento, perfil: PerfilInversor) -> InstrumentoOut | None:
+def _tir_nominal_estimada(instrumento: Instrumento, tir: float | None, rem_inflacion_12m: float | None) -> float | None:
+    """Ver bcra.py: compuesta, no aditiva — (1+real)*(1+inflación esperada)-1. Solo tiene
+    sentido para BONCER, que cotiza en tasa real porque el capital ya se ajusta por CER
+    (ver ingest.py:tir_sufijo)."""
+    if instrumento.subtipo != "BONCER" or tir is None or rem_inflacion_12m is None:
+        return None
+    return round((1 + tir / 100) * (1 + rem_inflacion_12m / 100) * 100 - 100, 2)
+
+
+def to_detail(
+    instrumento: Instrumento, perfil: PerfilInversor, rem_inflacion_12m: float | None = None
+) -> InstrumentoOut | None:
     cot = _ultima_cotizacion(instrumento)
     if cot is None:
         return None
@@ -75,6 +86,7 @@ def to_detail(instrumento: Instrumento, perfil: PerfilInversor) -> InstrumentoOu
         operaciones=cot.operaciones,
         tir=cot.tir,
         tirSufijo=cot.tir_sufijo,
+        tirNominalEstimada=_tir_nominal_estimada(instrumento, cot.tir, rem_inflacion_12m),
         tna=cot.tna,
         duration=cot.duration,
         plazoResidual=cot.plazo_residual,

@@ -19,6 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .database import SessionFinanciera
+from .financial_utils import actualizar_todo as actualizar_financial_utils
 from .ingest import importar
 
 logger = logging.getLogger("rentafy.scheduler")
@@ -47,6 +48,17 @@ def _actualizar_catalogo() -> None:
     logger.error("Actualización diaria de compararfondos.com.ar falló tras %s intentos.", MAX_REINTENTOS)
 
 
+def _actualizar_financial_utils() -> None:
+    """REM (BCRA), Riesgo País y Dólar CCL/MEP (ArgentinaDatos) — ver financial_utils.py.
+    Indicadores secundarios: un solo intento cada uno, sin reintentos ni bloquear la
+    actualización del catálogo si alguna fuente externa no responde."""
+    db = SessionFinanciera()
+    try:
+        actualizar_financial_utils(db)
+    finally:
+        db.close()
+
+
 def iniciar_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=ZONA_HORARIA_MERCADO)
     scheduler.add_job(
@@ -59,6 +71,14 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         name=f"Actualización diaria del catálogo (compararfondos.com.ar, {HORA_ACTUALIZACION}:00 ART)",
         replace_existing=True,
         misfire_grace_time=3600,  # si el proceso estaba caído a las 18:00, la corre al levantar
+    )
+    scheduler.add_job(
+        _actualizar_financial_utils,
+        trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=5, day_of_week="mon-fri"),
+        id="financial_utils_diario",
+        name="Actualización diaria de financial_utils (REM BCRA, Riesgo País, Dólar CCL/MEP)",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
     scheduler.start()
     logger.info("Scheduler iniciado: próxima corrida %s", scheduler.get_job("actualizar_compararfondos_diario").next_run_time)

@@ -15,15 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..deps import get_db_financiera
+from ..financial_utils import obtener_indicador_mercado
 from ..ingest import importar as importar_compararfondos
 from ..schemas import IndicadorMercado
 
 router = APIRouter(prefix="/mercado", tags=["mercado"])
 
 DATA912_BONDS_URL = "https://data912.com/live/arg_bonds"
-ARGENTINADATOS_DOLARES_URL = "https://api.argentinadatos.com/v1/cotizaciones/dolares"
 ARGENTINADATOS_INFLACION_URL = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion"
-ARGENTINADATOS_RIESGO_PAIS_URL = "https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais"
 
 _MESES_ES = [
     "ene.", "feb.", "mar.", "abr.", "may.", "jun.",
@@ -44,23 +43,6 @@ def precio_bono(symbol: str):
         if bond["symbol"] == symbol.upper():
             return {"symbol": bond["symbol"], "price": bond["c"], "fuente": "data912"}
     raise HTTPException(404, f"No se encontró el bono «{symbol}» en data912")
-
-
-def _dolar_ccl_mep() -> dict[str, dict]:
-    response = requests.get(ARGENTINADATOS_DOLARES_URL, timeout=5)
-    response.raise_for_status()
-    filas = response.json()
-
-    def ultimo_y_variacion(casa: str) -> dict:
-        filtradas = [f for f in filas if f["casa"] == casa]
-        if not filtradas:
-            return None
-        ultimo, anterior = filtradas[-1], (filtradas[-2] if len(filtradas) > 1 else None)
-        variacion = ((ultimo["venta"] - anterior["venta"]) / anterior["venta"] * 100) if anterior else 0.0
-        fecha = datetime.strptime(ultimo["fecha"], "%Y-%m-%d")
-        return {"valor": ultimo["venta"], "variacion": variacion, "fecha_label": fecha.strftime("%d/%m")}
-
-    return {"ccl": ultimo_y_variacion("contadoconliqui"), "mep": ultimo_y_variacion("bolsa")}
 
 
 def _inflacion_mensual() -> dict:
@@ -87,29 +69,6 @@ def _inflacion_mensual() -> dict:
     return {"valor": ultimo["valor"], "mes_label": mes_label, "tendencia": tendencia, "detalle": detalle}
 
 
-def _riesgo_pais() -> dict:
-    """Último valor de riesgo país (puntos básicos, EMBI), con su fecha. A diferencia de la
-    inflación (mensual), el riesgo país se publica a diario, así que acá se muestra la fecha
-    del dato en vez de una comparación contra el "mes anterior"."""
-    response = requests.get(ARGENTINADATOS_RIESGO_PAIS_URL, timeout=5)
-    response.raise_for_status()
-    filas = response.json()
-
-    ultimo, anterior = filas[-1], (filas[-2] if len(filas) > 1 else None)
-    fecha = datetime.strptime(ultimo["fecha"], "%Y-%m-%d")
-
-    if anterior is not None:
-        delta = ultimo["valor"] - anterior["valor"]
-        tendencia = "positiva" if delta < 0 else ("negativa" if delta > 0 else "neutral")  # bajar es buena noticia
-        signo = "+" if delta > 0 else ""
-        variacion = f"{signo}{delta:.0f} pts"
-    else:
-        tendencia = "neutral"
-        variacion = "—"
-
-    return {"valor": ultimo["valor"], "variacion": variacion, "tendencia": tendencia, "fecha_label": fecha.strftime("%d/%m")}
-
-
 @router.post("/importar/compararfondos")
 def importar_bonos_compararfondos(db: Session = Depends(get_db_financiera)):
     """Dispara la importación en vivo desde compararfondos.com.ar (RF-07/RF-08).
@@ -124,12 +83,14 @@ def importar_bonos_compararfondos(db: Session = Depends(get_db_financiera)):
 
 
 @router.get("/indicadores", response_model=list[IndicadorMercado])
-def indicadores_mercado():
-    """Indicadores del Dashboard. Dólar CCL/MEP, Inflación mensual y Riesgo País en vivo
-    (ArgentinaDatos). S&P Merval queda como valor de referencia: no se encontró una fuente
-    gratuita y sin registro para el nivel del índice (data912 solo expone las acciones
-    individuales del panel líder, no el agregado). RNF-09: ante la falla de una fuente se
-    conserva el último valor de referencia conocido."""
+def indicadores_mercado(db: Session = Depends(get_db_financiera)):
+    """Indicadores del Dashboard. Inflación mensual sigue en vivo (ArgentinaDatos, cadencia
+    mensual — no justifica cachear). Dólar CCL/MEP y Riesgo País ahora se leen de la cache
+    que mantiene al día el job de las 18:05 (ver financial_utils.py) en vez de pegarle a
+    ArgentinaDatos en cada carga del Dashboard. S&P Merval queda como valor de referencia: no
+    se encontró una fuente gratuita y sin registro para el nivel del índice (data912 solo
+    expone las acciones individuales del panel líder, no el agregado). RNF-09: ante la falta
+    de un valor cacheado (o la falla de inflación en vivo) se conserva el de referencia."""
 
     indicadores = [
         IndicadorMercado(label="S&P Merval", valor="2.352.486,25", variacion="+1,35%", tendencia="positiva"),
@@ -151,34 +112,14 @@ def indicadores_mercado():
     except requests.RequestException:
         pass  # RNF-09: se conserva el valor de referencia
 
-    try:
-        riesgo = _riesgo_pais()
-        for ind in indicadores:
-            if ind.label == "Riesgo País":
-                ind.valor = str(round(riesgo["valor"]))
-                ind.variacion = riesgo["variacion"]
-                ind.tendencia = riesgo["tendencia"]
+    for ind in indicadores:
+        if ind.label in ("Dólar CCL", "Dólar MEP", "Riesgo País"):
+            cache = obtener_indicador_mercado(db, ind.label)
+            if cache is not None:
+                ind.valor = cache.valor
+                ind.variacion = cache.variacion
+                ind.tendencia = cache.tendencia
                 ind.enVivo = True
-                ind.detalle = riesgo["fecha_label"]
-    except requests.RequestException:
-        pass  # RNF-09: se conserva el valor de referencia
-
-    try:
-        dolares = _dolar_ccl_mep()
-    except requests.RequestException:
-        return indicadores  # RNF-09: se conservan los valores de referencia
-
-    for label, key in (("Dólar CCL", "ccl"), ("Dólar MEP", "mep")):
-        punto = dolares.get(key)
-        if punto is None:
-            continue
-        for ind in indicadores:
-            if ind.label == label:
-                ind.valor = f"$ {punto['valor']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                signo = "+" if punto["variacion"] >= 0 else ""
-                ind.variacion = f"{signo}{punto['variacion']:.2f}%"
-                ind.tendencia = "positiva" if punto["variacion"] >= 0 else "negativa"
-                ind.enVivo = True
-                ind.detalle = punto["fecha_label"]
+                ind.detalle = cache.detalle
 
     return indicadores

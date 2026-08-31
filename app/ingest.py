@@ -216,7 +216,11 @@ def importar(db: Session) -> dict:
                 volumen=bond.get("volume") or 0,
                 operaciones=bond.get("operaciones") or 0,
                 tir=bond.get("tir"),
-                tir_sufijo=None,
+                # BONCER: el capital y los cupones ya se ajustan por CER (inflación) antes de
+                # aplicar la tasa, así que la TIR que reporta la fuente es una tasa REAL, no
+                # nominal — el sufijo lo aclara en vez de mostrar un número que confundiría
+                # (compararla 1 a 1 contra la TIR nominal de una LECAP/Bono USD sería engañoso).
+                tir_sufijo="+ CER" if tipo == "BONO" and subtipo == "BONCER" else None,
                 tna=bond.get("tna"),
                 duration=duration,
                 plazo_residual=plazo_residual,

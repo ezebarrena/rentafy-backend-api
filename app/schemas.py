@@ -44,6 +44,10 @@ class InstrumentoOut(BaseModel):
     operaciones: int
     tir: Optional[float]
     tirSufijo: Optional[str] = None
+    tirNominalEstimada: Optional[float] = Field(
+        default=None,
+        description="Solo para BONCER: TIR real + inflación esperada REM (BCRA) a 12 meses, compuesta. Estimación, no un dato de mercado.",
+    )
     tna: Optional[float]
     duration: Optional[float]
     plazoResidual: Optional[float] = None
