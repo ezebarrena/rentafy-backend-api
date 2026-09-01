@@ -142,7 +142,10 @@ def historico_instrumento(ticker: str, db: Session = Depends(get_db_financiera))
         .order_by(Cotizacion.fecha)
         .all()
     )
-    return [PuntoHistorico(fecha=f.fecha, precio=f.precio) for f in filas]
+    return [
+        PuntoHistorico(fecha=f.fecha, precio=f.precio, volumen=f.volumen, operaciones=f.operaciones)
+        for f in filas
+    ]
 
 
 @router.get("/{ticker}", response_model=InstrumentoOut)

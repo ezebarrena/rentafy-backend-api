@@ -184,3 +184,5 @@ class PuntoHistorico(BaseModel):
 
     fecha: date
     precio: float
+    volumen: float
+    operaciones: int
