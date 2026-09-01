@@ -186,3 +186,39 @@ class PuntoHistorico(BaseModel):
     precio: float
     volumen: float
     operaciones: int
+
+
+class PuntoScore(BaseModel):
+    """Score ya ponderado según el perfil solicitado (mismo compute_score() que el valor
+    vigente), para un día con Scoring calculado. No es un dato nuevo a almacenar: Scoring ya
+    tiene una fila por instrumento y día desde que corre el Servicio de IA."""
+
+    fecha: date
+    score: int
+
+
+class PuntoCurva(BaseModel):
+    ticker: str
+    nombre: str
+    duration: float
+    tir: float
+
+
+class CurvaRendimiento(BaseModel):
+    """Curva de rendimiento (TIR contra duration) de un grupo de instrumentos homogéneo —
+    mismo tipo, subtipo y moneda, ajustada con una regresión log-lineal (TIR = a + b*ln(duration)).
+
+    Para ON esto agrupa TODOS los emisores en una sola curva: mezcla riesgo de crédito
+    distinto (YPF con Cresud, por ejemplo) como si fuera comparable. Es una simplificación
+    deliberada, no un descuido — separar por emisor queda para una iteración futura (ver
+    también rendimiento.py del Servicio de IA, mismo tipo de limitación por falta de rating
+    crediticio integrado)."""
+
+    tipo: TipoInstrumento
+    subtipo: Optional[str] = None
+    moneda: Moneda
+    label: str
+    puntos: list[PuntoCurva]
+    a: float
+    b: float
+    r2: float

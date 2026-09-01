@@ -1,6 +1,8 @@
 """RF-13 a RF-29: listado, cobertura de categorías, búsqueda, filtrado, ordenamiento y
 detalle de instrumentos. Espeja rentafy-frontend/src/data/filters.ts y sort.ts."""
 
+import math
+from collections import defaultdict
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,9 +10,55 @@ from sqlalchemy.orm import Session
 
 from ..financial_utils import obtener_rem_inflacion
 from ..deps import get_db_financiera
-from ..models_financiera import Cotizacion, Instrumento
-from ..schemas import InstrumentoOpcion, InstrumentoOut, PaginatedInstrumentos, PerfilInversor, PuntoHistorico
+from ..models_financiera import Cotizacion, Instrumento, Scoring
+from ..schemas import (
+    CurvaRendimiento,
+    InstrumentoOpcion,
+    InstrumentoOut,
+    PaginatedInstrumentos,
+    PerfilInversor,
+    PuntoCurva,
+    PuntoHistorico,
+    PuntoScore,
+)
+from ..scoring import compute_score
 from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
+
+DIAS_SCORING_HISTORICO = 20
+CURVA_MINIMO_PUNTOS = 3
+
+_CURVA_LABELS = {
+    "ON": "Obligaciones Negociables",
+    "LECAP": "LECAP",
+    "BONCAP": "BONCAP",
+    "LETRA": "Letras",
+}
+
+
+def _curva_label(tipo: str, subtipo: Optional[str], moneda: str) -> str:
+    if tipo == "BONO":
+        if subtipo:
+            return f"Bonos {subtipo}"
+        return f"Bonos {moneda}"
+    return _CURVA_LABELS.get(tipo, f"{tipo} {moneda}")
+
+
+def _ajustar_curva(puntos: list[tuple[float, float]]) -> Optional[tuple[float, float, float]]:
+    """Regresión TIR = a + b*ln(duration) por mínimos cuadrados, sin depender de numpy (no es
+    una dependencia del backend) — son un puñado de sumas, no hace falta más que eso."""
+    xs = [math.log(duration) for duration, _ in puntos]
+    ys = [tir for _, tir in puntos]
+    n = len(xs)
+    xbar, ybar = sum(xs) / n, sum(ys) / n
+    sxx = sum((x - xbar) ** 2 for x in xs)
+    syy = sum((y - ybar) ** 2 for y in ys)
+    if sxx == 0 or syy == 0:
+        return None
+    sxy = sum((x - xbar) * (y - ybar) for x, y in zip(xs, ys))
+    b = sxy / sxx
+    a = ybar - b * xbar
+    r2 = (sxy**2) / (sxx * syy)
+    return round(a, 4), round(b, 4), round(r2, 4)
 
 router = APIRouter(prefix="/instrumentos", tags=["instrumentos"])
 
@@ -150,6 +198,50 @@ def opciones_instrumentos(db: Session = Depends(get_db_financiera)):
     ]
 
 
+@router.get("/curvas", response_model=list[CurvaRendimiento])
+def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
+    """Curva de rendimiento (TIR contra duration) por grupo de pares — mismo agrupamiento
+    (tipo, subtipo, moneda) que usan los factores del Servicio de IA. Solo se devuelven grupos
+    con {CURVA_MINIMO_PUNTOS}+ instrumentos con TIR y duration/plazo residual calculables: sin
+    eso no hay curva que ajustar (ej. DUAL/TAMAR/Dólar Linked, que hoy no tienen TIR — ver
+    limitación conocida de estimación de margen)."""
+    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
+    cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
+
+    grupos: dict[tuple[str, Optional[str], str], list[PuntoCurva]] = defaultdict(list)
+    for inst in instrumentos:
+        cot = cotizaciones.get(inst.ticker)
+        if cot is None or cot.tir is None:
+            continue
+        duration = cot.duration if cot.duration is not None else cot.plazo_residual
+        if duration is None or duration <= 0:
+            continue
+        clave = (inst.tipo, inst.subtipo, inst.moneda)
+        grupos[clave].append(
+            PuntoCurva(ticker=inst.ticker, nombre=inst.nombre, duration=round(duration, 2), tir=round(cot.tir, 2))
+        )
+
+    resultado = []
+    for (tipo, subtipo, moneda), puntos in grupos.items():
+        if len(puntos) < CURVA_MINIMO_PUNTOS:
+            continue
+        ajuste = _ajustar_curva([(p.duration, p.tir) for p in puntos])
+        if ajuste is None:
+            continue
+        a, b, r2 = ajuste
+        puntos.sort(key=lambda p: p.duration)
+        resultado.append(
+            CurvaRendimiento(
+                tipo=tipo, subtipo=subtipo, moneda=moneda,
+                label=_curva_label(tipo, subtipo, moneda),
+                puntos=puntos, a=a, b=b, r2=r2,
+            )
+        )
+
+    resultado.sort(key=lambda c: c.label)
+    return resultado
+
+
 @router.get("/{ticker}/historico", response_model=list[PuntoHistorico])
 def historico_instrumento(ticker: str, db: Session = Depends(get_db_financiera)):
     """Serie de precios de cierre diarios (RF-07), tal como los fue dejando el job de las
@@ -162,6 +254,32 @@ def historico_instrumento(ticker: str, db: Session = Depends(get_db_financiera))
     )
     return [
         PuntoHistorico(fecha=f.fecha, precio=f.precio, volumen=f.volumen, operaciones=f.operaciones)
+        for f in filas
+    ]
+
+
+@router.get("/{ticker}/scoring-historico", response_model=list[PuntoScore])
+def scoring_historico(
+    ticker: str, db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")
+):
+    """Score de los últimos {DIAS_SCORING_HISTORICO} días con Scoring calculado, según el
+    perfil solicitado. No hay ningún dato nuevo que almacenar para esto: Scoring ya acumula
+    una fila por instrumento y día desde que corre el Servicio de IA (no se pisa, a
+    diferencia del resumen en Instrumento) — acá solo se les aplica compute_score(), la misma
+    función que ya arma el valor vigente en to_detail/to_list_item."""
+    filas = (
+        db.query(Scoring)
+        .filter(Scoring.instrumento_ticker == ticker.upper())
+        .order_by(Scoring.fecha_calculo.desc())
+        .limit(DIAS_SCORING_HISTORICO)
+        .all()
+    )
+    filas.reverse()  # ascendente para el gráfico, igual que /historico
+    return [
+        PuntoScore(
+            fecha=f.fecha_calculo,
+            score=compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil),
+        )
         for f in filas
     ]
 
