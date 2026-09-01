@@ -222,3 +222,7 @@ class CurvaRendimiento(BaseModel):
     a: float
     b: float
     r2: float
+    # Instrumentos del mismo grupo que quedaron afuera del ajuste por duration muy chica (ver
+    # CURVA_DURATION_MINIMA) — se muestran igual, aparte, para que quede claro que no es que
+    # falten datos: es que ese tramo es demasiado ruidoso para curvear.
+    excluidos: list[PuntoCurva] = []

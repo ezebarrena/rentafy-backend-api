@@ -26,6 +26,17 @@ from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos
 
 DIAS_SCORING_HISTORICO = 20
 CURVA_MINIMO_PUNTOS = 3
+# Candidatos a excluir: instrumentos a menos de ~55 días del vencimiento, donde la TIR
+# anualizada amplifica cualquier ruido de precio. No se excluyen todos los que caen acá — ver
+# CURVA_RESIDUO_MINIMO — porque no todo tramo corto es ruidoso: las LECAP más cortas del
+# catálogo, por ejemplo, siguen la tendencia del resto sin desviarse.
+CURVA_DURATION_MINIMA = 0.15
+# De los candidatos por duration, solo se excluyen los que además se desvían más de esto (en
+# puntos porcentuales de TIR) del ajuste hecho con todos los puntos del grupo — ej. X30S6
+# (BONCER a 29 días) rinde 13,05% contra una curva que predice ~8,9% ahí: un desvío real, no
+# ruido de tramo corto nomás. Con esto se distingue ese caso de una LECAP corta que sí sigue la
+# tendencia (desvío chico) y no debería perderse del ajuste.
+CURVA_RESIDUO_MINIMO = 1.5
 
 _CURVA_LABELS = {
     "ON": "Obligaciones Negociables",
@@ -211,48 +222,101 @@ def opciones_instrumentos(db: Session = Depends(get_db_financiera)):
     ]
 
 
-@router.get("/curvas", response_model=list[CurvaRendimiento])
-def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
-    """Curva de rendimiento (TIR contra duration) por grupo de pares — mismo agrupamiento
-    (tipo, subtipo, moneda) que usan los factores del Servicio de IA. Solo se devuelven grupos
-    con {CURVA_MINIMO_PUNTOS}+ instrumentos con TIR y duration/plazo residual calculables: sin
-    eso no hay curva que ajustar (ej. DUAL/TAMAR/Dólar Linked, que hoy no tienen TIR — ver
-    limitación conocida de estimación de margen)."""
-    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
-    cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
-
+def _construir_curvas(
+    instrumentos: list[Instrumento], cotizaciones: dict[str, Cotizacion]
+) -> dict[tuple[str, Optional[str], str], CurvaRendimiento]:
+    """Agrupa por (tipo, subtipo, moneda) — mismo agrupamiento que usan los factores del
+    Servicio de IA — y ajusta una curva por grupo con {CURVA_MINIMO_PUNTOS}+ instrumentos con
+    TIR y duration/plazo residual calculables (ej. DUAL/TAMAR/Dólar Linked no tienen TIR hoy —
+    ver limitación conocida de estimación de margen, quedan afuera). Compartida por /curvas
+    (todos los grupos) y /{ticker}/curva (uno solo) para no repetir el ajuste de dos pasadas."""
     grupos: dict[tuple[str, Optional[str], str], list[PuntoCurva]] = defaultdict(list)
     for inst in instrumentos:
         cot = cotizaciones.get(inst.ticker)
         if cot is None or cot.tir is None:
             continue
         duration = cot.duration if cot.duration is not None else cot.plazo_residual
-        if duration is None or duration <= 0:
+        if duration is None:
             continue
         clave = (inst.tipo, inst.subtipo, inst.moneda)
         grupos[clave].append(
             PuntoCurva(ticker=inst.ticker, nombre=inst.nombre, duration=round(duration, 2), tir=round(cot.tir, 2))
         )
 
-    resultado = []
-    for (tipo, subtipo, moneda), puntos in grupos.items():
+    resultado: dict[tuple[str, Optional[str], str], CurvaRendimiento] = {}
+    for clave, todos in grupos.items():
+        tipo, subtipo, moneda = clave
+        if len(todos) < CURVA_MINIMO_PUNTOS:
+            continue
+        # Primera pasada con todos los puntos del grupo, para tener una curva de referencia
+        # contra la cual medir el desvío de los candidatos a excluir (duration corta).
+        ajuste_previo = _ajustar_curva([(p.duration, p.tir) for p in todos])
+        if ajuste_previo is None:
+            continue
+        a0, b0, _ = ajuste_previo
+
+        puntos, excluidos = [], []
+        for p in todos:
+            candidato = p.duration < CURVA_DURATION_MINIMA
+            desvio = abs(p.tir - (a0 + b0 * math.log(p.duration)))
+            if candidato and desvio > CURVA_RESIDUO_MINIMO:
+                excluidos.append(p)
+            else:
+                puntos.append(p)
+
         if len(puntos) < CURVA_MINIMO_PUNTOS:
             continue
+        # Si no hubo exclusiones, este ajuste final coincide exactamente con el previo.
         ajuste = _ajustar_curva([(p.duration, p.tir) for p in puntos])
         if ajuste is None:
             continue
         a, b, r2 = ajuste
         puntos.sort(key=lambda p: p.duration)
-        resultado.append(
-            CurvaRendimiento(
-                tipo=tipo, subtipo=subtipo, moneda=moneda,
-                label=_curva_label(tipo, subtipo, moneda),
-                puntos=puntos, a=a, b=b, r2=r2,
-            )
+        resultado[clave] = CurvaRendimiento(
+            tipo=tipo, subtipo=subtipo, moneda=moneda,
+            label=_curva_label(tipo, subtipo, moneda),
+            puntos=puntos, a=a, b=b, r2=r2,
+            excluidos=sorted(excluidos, key=lambda p: p.duration),
         )
 
+    return resultado
+
+
+@router.get("/curvas", response_model=list[CurvaRendimiento])
+def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
+    """Curva de rendimiento (TIR contra duration) de los 5 grupos de pares con datos
+    suficientes — para la pestaña "Rendimientos". El detalle de un instrumento puntual no usa
+    este endpoint (ver /{ticker}/curva): no necesita los otros 4 grupos."""
+    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
+    cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
+    resultado = list(_construir_curvas(instrumentos, cotizaciones).values())
     resultado.sort(key=lambda c: _curva_orden_key(c.label))
     return resultado
+
+
+@router.get("/{ticker}/curva", response_model=Optional[CurvaRendimiento])
+def curva_instrumento(ticker: str, db: Session = Depends(get_db_financiera)):
+    """Curva de rendimiento del grupo de pares de un instrumento puntual — versión liviana de
+    /curvas para InstrumentDetail.tsx, que solo necesita el grupo de la ficha que se está
+    viendo, no los otros 4. Trae y agrupa solo los instrumentos con el mismo (tipo, subtipo,
+    moneda), no el catálogo activo entero. Null si el grupo no tiene suficientes instrumentos
+    para un ajuste, o si este instrumento no tiene TIR/duration calculables."""
+    instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker.upper()).first()
+    if instrumento is None:
+        raise HTTPException(404, f"No se encontró el instrumento «{ticker}»")
+    pares = (
+        db.query(Instrumento)
+        .filter(
+            Instrumento.activo.is_(True),
+            Instrumento.tipo == instrumento.tipo,
+            Instrumento.subtipo == instrumento.subtipo,
+            Instrumento.moneda == instrumento.moneda,
+        )
+        .all()
+    )
+    cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in pares])
+    clave = (instrumento.tipo, instrumento.subtipo, instrumento.moneda)
+    return _construir_curvas(pares, cotizaciones).get(clave)
 
 
 @router.get("/{ticker}/historico", response_model=list[PuntoHistorico])
