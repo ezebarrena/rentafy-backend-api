@@ -6,7 +6,10 @@ instrumento recién importado desde una fuente de mercado (ver ingest.py) tiene 
 pero todavía no tiene Scoring calculado, dado que ese cálculo es responsabilidad de un
 componente separado (el Servicio de IA, fuera del alcance de este backend)."""
 
-from .models_financiera import Instrumento
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
+from .models_financiera import Cotizacion, Instrumento, Scoring
 from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, PerfilInversor
 from .scoring import compute_score
 
@@ -23,17 +26,60 @@ def _ultimo_scoring(instrumento: Instrumento):
     return max(instrumento.scores, key=lambda s: s.fecha_calculo)
 
 
+def ultimas_cotizaciones(db: Session, tickers: list[str]) -> dict[str, Cotizacion]:
+    """Última Cotizacion de cada ticker en UNA sola query (DISTINCT ON de Postgres, requiere
+    que el ORDER BY empiece por la misma columna del DISTINCT ON). Para un listado de N
+    instrumentos, esto reemplaza las N consultas que dispara acceder a
+    `instrumento.cotizaciones` por cada uno (esa relación carga el historial completo del
+    ticker solo para quedarse con el más reciente) — el mismo resultado, sin el N+1."""
+    if not tickers:
+        return {}
+    filas = (
+        db.query(Cotizacion)
+        .filter(Cotizacion.instrumento_ticker.in_(tickers))
+        .order_by(Cotizacion.instrumento_ticker, desc(Cotizacion.fecha))
+        .distinct(Cotizacion.instrumento_ticker)
+        .all()
+    )
+    return {c.instrumento_ticker: c for c in filas}
+
+
+def ultimos_scoring(db: Session, tickers: list[str]) -> dict[str, Scoring]:
+    """Ídem `ultimas_cotizaciones` pero para Scoring."""
+    if not tickers:
+        return {}
+    filas = (
+        db.query(Scoring)
+        .filter(Scoring.instrumento_ticker.in_(tickers))
+        .order_by(Scoring.instrumento_ticker, desc(Scoring.fecha_calculo))
+        .distinct(Scoring.instrumento_ticker)
+        .all()
+    )
+    return {s.instrumento_ticker: s for s in filas}
+
+
 def _score(sc, perfil: PerfilInversor) -> float | None:
     if sc is None:
         return None
     return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil)
 
 
-def to_list_item(instrumento: Instrumento, perfil: PerfilInversor) -> InstrumentoListItem | None:
-    cot = _ultima_cotizacion(instrumento)
+def to_list_item(
+    instrumento: Instrumento,
+    perfil: PerfilInversor,
+    cot: Cotizacion | None = None,
+    sc: Scoring | None = None,
+) -> InstrumentoListItem | None:
+    """`cot`/`sc`: si el llamador ya los resolvió en batch (ver `ultimas_cotizaciones`/
+    `ultimos_scoring`, para listados de muchos instrumentos), se usan tal cual — si no, cae
+    al lookup vía relationship (instrumento por instrumento, para el caso de un solo
+    instrumento donde el batch no aporta nada)."""
+    if cot is None:
+        cot = _ultima_cotizacion(instrumento)
     if cot is None:
         return None
-    sc = _ultimo_scoring(instrumento)
+    if sc is None:
+        sc = _ultimo_scoring(instrumento)
     return InstrumentoListItem(
         ticker=instrumento.ticker,
         nombre=instrumento.nombre,

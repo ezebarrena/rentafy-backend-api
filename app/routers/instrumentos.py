@@ -10,7 +10,7 @@ from ..financial_utils import obtener_rem_inflacion
 from ..deps import get_db_financiera
 from ..models_financiera import Cotizacion, Instrumento
 from ..schemas import InstrumentoOpcion, InstrumentoOut, PaginatedInstrumentos, PerfilInversor, PuntoHistorico
-from ..serializers import to_detail, to_list_item
+from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 router = APIRouter(prefix="/instrumentos", tags=["instrumentos"])
 
@@ -41,25 +41,43 @@ def listar_instrumentos(
     # vencido, delisted, etc. — ver ingest.py:_marcar_ausentes_como_inactivos). Se excluye de
     # los listados para no seguir mostrando un precio cada vez más viejo; el detalle
     # (GET /instrumentos/{ticker}) lo sigue sirviendo igual, por si alguien lo tiene en watchlist.
-    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
-
+    #
+    # Todo lo que se puede resolver con una columna de Instrumento se filtra acá, en SQL, en
+    # vez de traer el catálogo entero y filtrarlo con list comprehensions en Python — con
+    # filtros activos (la mayoría de los usos reales) esto reduce bastante cuántas filas
+    # siquiera llegan a Python.
+    query = db.query(Instrumento).filter(Instrumento.activo.is_(True))
     if tipo and tipo != "TODOS":
-        instrumentos = [i for i in instrumentos if i.tipo == tipo]
+        query = query.filter(Instrumento.tipo == tipo)
     if subtipo and subtipo != "TODOS":
-        instrumentos = [i for i in instrumentos if i.subtipo == subtipo]
+        query = query.filter(Instrumento.subtipo == subtipo)
     if moneda:
-        instrumentos = [i for i in instrumentos if i.moneda == moneda]
+        query = query.filter(Instrumento.moneda == moneda)
     if riesgo and riesgo != "TODOS":
-        instrumentos = [i for i in instrumentos if i.riesgo == riesgo]
+        query = query.filter(Instrumento.riesgo == riesgo)
     if emisor and emisor != "TODOS":
-        instrumentos = [i for i in instrumentos if i.emisor == emisor]
+        query = query.filter(Instrumento.emisor == emisor)
     if q:
-        query = q.lower()
-        instrumentos = [
-            i for i in instrumentos if query in i.ticker.lower() or query in i.nombre.lower()
-        ]
+        patron = f"%{q}%"
+        query = query.filter(Instrumento.ticker.ilike(patron) | Instrumento.nombre.ilike(patron))
+    instrumentos = query.all()
 
-    items = [item for item in (to_list_item(i, perfil) for i in instrumentos) if item is not None]
+    # Score y TIR no son columnas de Instrumento (se calculan a partir de Scoring/Cotizacion,
+    # con la ponderación por perfil recién aplicada acá), así que ordenar/filtrar por ellos
+    # sigue siendo un paso en Python — pero ya sobre el subconjunto filtrado arriba, no sobre
+    # todo el catálogo activo. La cotización y el scoring más recientes de cada ticker se
+    # traen en dos queries batcheadas (no una por instrumento, ver serializers.py).
+    tickers = [i.ticker for i in instrumentos]
+    cotizaciones = ultimas_cotizaciones(db, tickers)
+    scorings = ultimos_scoring(db, tickers)
+    items = [
+        item
+        for item in (
+            to_list_item(i, perfil, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
+            for i in instrumentos
+        )
+        if item is not None
+    ]
 
     if tir_min is not None:
         items = [i for i in items if i.tir is not None and i.tir >= tir_min]

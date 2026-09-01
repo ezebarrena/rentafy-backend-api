@@ -13,7 +13,7 @@ from ..deps import get_db_financiera
 from ..models_financiera import Instrumento
 from ..schemas import PaginatedInstrumentos, PerfilInversor, ScoreRentafyPesosOut
 from ..scoring import PESOS_PERFIL
-from ..serializers import to_list_item
+from ..serializers import to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 router = APIRouter(tags=["rankings"])
 
@@ -27,15 +27,22 @@ def ranking(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
 ):
-    instrumentos = (
-        db.query(Instrumento)
-        .filter(Instrumento.moneda == moneda, Instrumento.activo.is_(True))
-        .all()
-    )
+    query = db.query(Instrumento).filter(Instrumento.moneda == moneda, Instrumento.activo.is_(True))
     if tipo and tipo != "TODOS":
-        instrumentos = [i for i in instrumentos if i.tipo == tipo]
+        query = query.filter(Instrumento.tipo == tipo)
+    instrumentos = query.all()
 
-    items = [item for item in (to_list_item(i, perfil) for i in instrumentos) if item is not None]
+    tickers = [i.ticker for i in instrumentos]
+    cotizaciones = ultimas_cotizaciones(db, tickers)
+    scorings = ultimos_scoring(db, tickers)
+    items = [
+        item
+        for item in (
+            to_list_item(i, perfil, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
+            for i in instrumentos
+        )
+        if item is not None
+    ]
     items.sort(key=lambda i: i.score if i.score is not None else float("-inf"), reverse=True)
 
     total = len(items)
