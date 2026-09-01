@@ -34,13 +34,26 @@ _CURVA_LABELS = {
     "LETRA": "Letras",
 }
 
+# Orden fijo de las pestañas/pills en el frontend (no alfabético): los grupos más consultados
+# primero. Cualquier grupo no listado acá cae al final, ordenado alfabéticamente entre sí.
+_CURVA_ORDEN = ["Bonos USD", "Bonos BONCER", "Obligaciones Negociables", "LECAP", "BONCAP"]
+
 
 def _curva_label(tipo: str, subtipo: Optional[str], moneda: str) -> str:
     if tipo == "BONO":
+        if subtipo and subtipo.startswith("Bono "):
+            return f"Bonos {subtipo[len('Bono '):]}"  # "Bono USD" -> "Bonos USD"
         if subtipo:
             return f"Bonos {subtipo}"
         return f"Bonos {moneda}"
     return _CURVA_LABELS.get(tipo, f"{tipo} {moneda}")
+
+
+def _curva_orden_key(label: str) -> tuple[int, str]:
+    try:
+        return (_CURVA_ORDEN.index(label), "")
+    except ValueError:
+        return (len(_CURVA_ORDEN), label)
 
 
 def _ajustar_curva(puntos: list[tuple[float, float]]) -> Optional[tuple[float, float, float]]:
@@ -238,7 +251,7 @@ def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
             )
         )
 
-    resultado.sort(key=lambda c: c.label)
+    resultado.sort(key=lambda c: _curva_orden_key(c.label))
     return resultado
 
 
