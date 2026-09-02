@@ -6,7 +6,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
-TipoInstrumento = Literal["BONO", "LETRA", "LECAP", "BONCAP", "ON"]
+TipoInstrumento = Literal["BONO", "LECAP", "BONCAP", "ON"]
 Moneda = Literal["ARS", "USD"]
 NivelRiesgo = Literal["Bajo", "Medio", "Alto"]
 NivelLiquidez = Literal["Alta", "Media", "Baja"]

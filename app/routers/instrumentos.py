@@ -42,7 +42,6 @@ _CURVA_LABELS = {
     "ON": "Obligaciones Negociables",
     "LECAP": "LECAP",
     "BONCAP": "BONCAP",
-    "LETRA": "Letras",
 }
 
 # Orden fijo de las pestañas/pills en el frontend (no alfabético): los grupos más consultados

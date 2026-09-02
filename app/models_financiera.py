@@ -18,7 +18,7 @@ class Instrumento(BaseFinanciera):
 
     ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
     nombre: Mapped[str] = mapped_column(String(200))
-    tipo: Mapped[str] = mapped_column(String(20))  # BONO | LETRA | LECAP | BONCAP | ON
+    tipo: Mapped[str] = mapped_column(String(20))  # BONO | LECAP | BONCAP | ON
     subtipo: Mapped[str | None] = mapped_column(String(50), nullable=True)
     moneda: Mapped[str] = mapped_column(String(3))  # ARS | USD
     emisor: Mapped[str] = mapped_column(String(200))

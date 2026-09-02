@@ -56,8 +56,16 @@ _LEY_MAP = {"Argentina": "Ley Argentina", "NY": "Ley Nueva York", "Nueva York": 
 def _mapear_tipo(bond: dict) -> tuple[str, str | None]:
     tipo_raw = bond["tipo"]
     tipo, subtipo = _TIPO_MAP.get(tipo_raw, ("BONO", tipo_raw))
-    if tipo == "BONO" and subtipo is None and tipo_raw in ("FIJA", "Soberano"):
-        subtipo = "Bono USD" if bond["moneda"] == "USD" else "Bono ARS"
+    if tipo == "BONO" and subtipo is None and tipo_raw in ("FIJA", "Soberano", "Provincial"):
+        # La fuente no distingue bonos provinciales ajustados por CER de los que pagan tasa
+        # nominal (a diferencia de los soberanos, que sí vienen con su propio tipo "CER") — se
+        # detecta por el nombre (ej. "PBA CER 9% Abr-28"), mismo criterio heurístico que ya usa
+        # este módulo para emisor/riesgo/liquidez. Sin esto, un bono real (CER) terminaba
+        # agrupado con nominales (BONTE) en la misma curva de rendimiento — TIR no comparable.
+        if tipo_raw == "Provincial" and "CER" in bond["nombre"].upper():
+            subtipo = "BONCER"
+        else:
+            subtipo = "Bono USD" if bond["moneda"] == "USD" else "Bono ARS"
     return tipo, subtipo
 
 
