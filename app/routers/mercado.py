@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..deps import get_db_financiera
-from ..financial_utils import obtener_indicador_mercado
+from ..financial_utils import REM_INFLACION_12M_URL, obtener_indicador_mercado
 from ..ingest import importar as importar_compararfondos
 from ..schemas import IndicadorMercado
 
@@ -69,6 +69,30 @@ def _inflacion_mensual() -> dict:
     return {"valor": ultimo["valor"], "mes_label": mes_label, "tendencia": tendencia, "detalle": detalle}
 
 
+def _rem_inflacion_esperada() -> dict:
+    """Inflación esperada a 12 meses (REM, BCRA) — mismo criterio que _inflacion_mensual(): la
+    encuesta es mensual, así que se consulta en vivo en cada carga en vez de cachearse (a
+    diferencia de Dólar CCL/MEP y Riesgo País, que sí varían dentro del día)."""
+    response = requests.get(REM_INFLACION_12M_URL, timeout=10)
+    response.raise_for_status()
+    # "detalle" viene descendente por fecha (el más reciente primero, ver financial_utils.py).
+    detalle = response.json()["results"][0]["detalle"]
+    ultimo, anterior = detalle[0], (detalle[1] if len(detalle) > 1 else None)
+    fecha = datetime.strptime(ultimo["fecha"], "%Y-%m-%d")
+    mes_label = f"{_MESES_ES[fecha.month - 1]} {fecha.year}"
+
+    detalle_txt, tendencia = None, "neutral"
+    if anterior is not None:
+        delta = ultimo["valor"] - anterior["valor"]
+        tendencia = "positiva" if delta < 0 else ("negativa" if delta > 0 else "neutral")  # bajar es buena noticia
+        fecha_anterior = datetime.strptime(anterior["fecha"], "%Y-%m-%d")
+        mes_anterior_label = f"{_MESES_ES[fecha_anterior.month - 1]} {fecha_anterior.year}"
+        valor_anterior = f"{anterior['valor']:.1f}".replace(".", ",")
+        detalle_txt = f"vs. {valor_anterior}% ({mes_anterior_label})"
+
+    return {"valor": ultimo["valor"], "mes_label": mes_label, "tendencia": tendencia, "detalle": detalle_txt}
+
+
 @router.post("/importar/compararfondos")
 def importar_bonos_compararfondos(db: Session = Depends(get_db_financiera)):
     """Dispara la importación en vivo desde compararfondos.com.ar (RF-07/RF-08).
@@ -84,16 +108,14 @@ def importar_bonos_compararfondos(db: Session = Depends(get_db_financiera)):
 
 @router.get("/indicadores", response_model=list[IndicadorMercado])
 def indicadores_mercado(db: Session = Depends(get_db_financiera)):
-    """Indicadores del Dashboard. Inflación mensual sigue en vivo (ArgentinaDatos, cadencia
-    mensual — no justifica cachear). Dólar CCL/MEP y Riesgo País ahora se leen de la cache
-    que mantiene al día el job de las 18:05 (ver financial_utils.py) en vez de pegarle a
-    ArgentinaDatos en cada carga del Dashboard. S&P Merval queda como valor de referencia: no
-    se encontró una fuente gratuita y sin registro para el nivel del índice (data912 solo
-    expone las acciones individuales del panel líder, no el agregado). RNF-09: ante la falta
-    de un valor cacheado (o la falla de inflación en vivo) se conserva el de referencia."""
+    """Indicadores del Dashboard. Inflación mensual e inflación esperada (REM) siguen en vivo
+    (cadencia mensual en la fuente — no justifica cachear). Dólar CCL/MEP y Riesgo País se leen
+    de la cache que mantiene al día el job de las 18:05 (ver financial_utils.py) en vez de
+    pegarle a ArgentinaDatos en cada carga del Dashboard. RNF-09: ante la falla de una fuente en
+    vivo se conserva el valor de referencia hardcodeado más abajo."""
 
     indicadores = [
-        IndicadorMercado(label="S&P Merval", valor="2.352.486,25", variacion="+1,35%", tendencia="positiva"),
+        IndicadorMercado(label="Inflación esperada 12 meses", valor="21,8%", variacion="Último dato", tendencia="neutral"),
         IndicadorMercado(label="Inflación mensual", valor="2,8%", variacion="Último dato", tendencia="neutral"),
         IndicadorMercado(label="Dólar CCL", valor="$ 1.489,40", variacion="+0,42%", tendencia="positiva"),
         IndicadorMercado(label="Dólar MEP", valor="$ 1.487,50", variacion="+0,42%", tendencia="positiva"),
@@ -109,6 +131,18 @@ def indicadores_mercado(db: Session = Depends(get_db_financiera)):
                 ind.tendencia = inflacion["tendencia"]
                 ind.enVivo = True
                 ind.detalle = inflacion["detalle"]
+    except requests.RequestException:
+        pass  # RNF-09: se conserva el valor de referencia
+
+    try:
+        rem = _rem_inflacion_esperada()
+        for ind in indicadores:
+            if ind.label == "Inflación esperada 12 meses":
+                ind.valor = f"{rem['valor']:.1f}%".replace(".", ",")
+                ind.variacion = rem["mes_label"]
+                ind.tendencia = rem["tendencia"]
+                ind.enVivo = True
+                ind.detalle = rem["detalle"]
     except requests.RequestException:
         pass  # RNF-09: se conserva el valor de referencia
 
