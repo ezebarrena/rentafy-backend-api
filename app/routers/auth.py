@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_db_no_financiera
 from ..models_no_financiera import PerfilInversorHistorial, Usuario
-from ..schemas import PerfilInversorUpdate, TokenOut, UsuarioLogin, UsuarioOut, UsuarioRegistro
+from ..schemas import PerfilInversorUpdate, TokenOut, UsuarioLogin, UsuarioNombreUpdate, UsuarioOut, UsuarioRegistro
 from ..security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -58,6 +58,19 @@ def login(datos: UsuarioLogin, db: Session = Depends(get_db_no_financiera)):
 
 @router.get("/me", response_model=UsuarioOut)
 def me(usuario: Usuario = Depends(get_current_user)):
+    return _to_out(usuario)
+
+
+@router.put("/me/nombre", response_model=UsuarioOut)
+def actualizar_nombre(
+    datos: UsuarioNombreUpdate, usuario: Usuario = Depends(get_current_user), db: Session = Depends(get_db_no_financiera)
+):
+    """Editar nombre/apellido (RF-04) — el email no es editable acá: identifica la cuenta y
+    está atado al login, cambiarlo requeriría reverificarlo."""
+    usuario.nombre = datos.nombre
+    usuario.apellido = datos.apellido
+    db.commit()
+    db.refresh(usuario)
     return _to_out(usuario)
 
 

@@ -152,6 +152,11 @@ class PerfilInversorUpdate(BaseModel):
     perfil: PerfilInversor
 
 
+class UsuarioNombreUpdate(BaseModel):
+    nombre: str = Field(min_length=1)
+    apellido: str = ""
+
+
 # --- Watchlist / calendario / mercado ---
 
 
