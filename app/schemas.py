@@ -178,6 +178,7 @@ class EventoCalendario(BaseModel):
     tipo: str
     importe: float
     emisor: str
+    moneda: str
 
 
 class IndicadorMercado(BaseModel):

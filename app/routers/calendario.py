@@ -32,6 +32,7 @@ def eventos_calendario(
             tipo=flujo.tipo,
             importe=flujo.importe,
             emisor=instrumento.emisor,
+            moneda=instrumento.moneda,
         )
         for flujo, instrumento in query.order_by(FlujoFondo.fecha).all()
     ]
