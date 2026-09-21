@@ -56,3 +56,8 @@ app.include_router(mercado.router)
 @app.get("/", tags=["health"])
 def health():
     return {"status": "ok", "service": "rentafy-backend-api"}
+
+
+@app.get("/test", tags=["health"])
+def test():
+    return "Facu y Eze, esto anda de 10"
