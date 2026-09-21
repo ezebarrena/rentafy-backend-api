@@ -19,6 +19,9 @@ jobs:
           script: |
             set -e
             cd /home/ec2-user/rentafy-backend-api
-            git fetch origin main
+            # El repo es privado: git en la sesión SSH no tiene credenciales propias, así
+            # que se autentica el fetch puntual con el GITHUB_TOKEN de la Action (via header,
+            # sin persistir nada en la config git del servidor).
+            git -c http.extraheader="AUTHORIZATION: bearer ${{ secrets.GITHUB_TOKEN }}" fetch origin main
             git reset --hard origin/main
             bash deploy/deploy.sh
