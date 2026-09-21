@@ -135,6 +135,13 @@ class UsuarioLogin(BaseModel):
     password: str
 
 
+class GoogleLogin(BaseModel):
+    """ID token que devuelve Google Identity Services en el frontend tras el login con Google;
+    se valida server-side contra la API de Google antes de confiar en su contenido."""
+
+    idToken: str
+
+
 class TokenOut(BaseModel):
     accessToken: str
     tokenType: str = "bearer"
