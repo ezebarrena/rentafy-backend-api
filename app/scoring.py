@@ -27,18 +27,22 @@ from .schemas import PerfilInversor, PesosPerfil, PlazoInversion
 # IA, ver chapter04.tex). Corresponde a la entidad PESO_PERFIL del modelo v1.4.0.
 PESOS_PERFIL: dict[PerfilInversor, PesosPerfil] = {
     "conservador": PesosPerfil(rendimiento=0.15, riesgo=0.30, liquidez=0.20, estabilidad=0.35),
-    "moderado": PesosPerfil(rendimiento=0.25, riesgo=0.25, liquidez=0.25, estabilidad=0.25),
-    "agresivo": PesosPerfil(rendimiento=0.55, riesgo=0.10, liquidez=0.20, estabilidad=0.15),
+    "moderado": PesosPerfil(rendimiento=0.27, riesgo=0.27, liquidez=0.20, estabilidad=0.26),
+    "agresivo": PesosPerfil(rendimiento=0.60, riesgo=0.10, liquidez=0.15, estabilidad=0.15),
 }
 
 # Nudge fijo (puntos de peso, no puntos de Score) sobre los pesos del perfil elegido, antes de
 # la redistribución por factores faltantes de más abajo. "mediano" no ajusta nada — es
 # exactamente el comportamiento de antes de que existiera el plazo, para no romper a nadie que
 # todavía no lo haya elegido explícitamente.
+#
+# Liquidez solo baja en "largo", nunca sube en "corto": conservador ya arranca en su techo
+# deseado de 20% (ver PESOS_PERFIL), así que un nudge positivo en corto lo pasaría de ese
+# techo para el único perfil donde liquidez es un valor tope, no un promedio a ajustar.
 AJUSTE_PLAZO: dict[PlazoInversion, dict[str, float]] = {
     "corto": {"rendimiento": -0.05, "riesgo": 0.03, "liquidez": 0.0, "estabilidad": 0.02},
     "mediano": {"rendimiento": 0.0, "riesgo": 0.0, "liquidez": 0.0, "estabilidad": 0.0},
-    "largo": {"rendimiento": 0.05, "riesgo": -0.03, "liquidez": 0.0, "estabilidad": -0.02},
+    "largo": {"rendimiento": 0.06, "riesgo": -0.03, "liquidez": -0.01, "estabilidad": -0.02},
 }
 
 
