@@ -21,15 +21,42 @@ comparación (penalizar un descalce plazo-vencimiento) quedó fuera de esta iter
 propósito, ver análisis de factibilidad.
 """
 
+from sqlalchemy.orm import Session
+
+from .models_financiera import Modelo, PesoPerfil
 from .schemas import PerfilInversor, PesosPerfil, PlazoInversion
 
 # Hipótesis de partida (sujeta a validación por el subproceso de Entrenamiento del Servicio de
-# IA, ver chapter04.tex). Corresponde a la entidad PESO_PERFIL del modelo v1.4.0.
+# IA, ver chapter04.tex). Corresponde a la entidad PESO_PERFIL del modelo v1.4.0. Es el punto de
+# partida que entrenamiento.py nudgea contra el backtest semanal (ver
+# rentafy-servicioIA/app/entrenamiento.py, TASA_APRENDIZAJE_EMPIRICO) y publica en la tabla
+# PesoPerfil — pesos_vigentes() de abajo lee ESA tabla; esto de acá es solo el fallback para
+# cuando todavía no hay ninguna fila publicada (Servicio de IA nunca corrió sobre esta base).
 PESOS_PERFIL: dict[PerfilInversor, PesosPerfil] = {
     "conservador": PesosPerfil(rendimiento=0.15, riesgo=0.30, liquidez=0.20, estabilidad=0.35),
     "moderado": PesosPerfil(rendimiento=0.27, riesgo=0.27, liquidez=0.20, estabilidad=0.26),
     "agresivo": PesosPerfil(rendimiento=0.60, riesgo=0.10, liquidez=0.15, estabilidad=0.15),
 }
+
+
+def pesos_vigentes(db: Session) -> dict[PerfilInversor, PesosPerfil]:
+    """Pesos realmente vigentes: los que el Servicio de IA publicó para el Modelo activo,
+    después de nudgearlos contra el backtest de auditoria.py (ver su docstring) — no la
+    hipótesis de partida estática. Se resuelve UNA vez por request (ver routers/*.py) y se pasa
+    a compute_score(), no una consulta por instrumento.
+
+    Cae a PESOS_PERFIL si todavía no hay ninguna fila publicada (entorno nuevo, o el Servicio
+    de IA nunca corrió contra esta base) — mismo criterio defensivo que el resto del sistema
+    ante datos faltantes: nunca romper, degradar a la hipótesis de partida."""
+    filas = db.query(PesoPerfil).join(Modelo, Modelo.id == PesoPerfil.modelo_id).filter(Modelo.activo.is_(True)).all()
+    pesos = {
+        fila.perfil: PesosPerfil(
+            rendimiento=fila.w_rendimiento, riesgo=fila.w_riesgo, liquidez=fila.w_liquidez, estabilidad=fila.w_estabilidad
+        )
+        for fila in filas
+        if fila.perfil in PESOS_PERFIL
+    }
+    return pesos if len(pesos) == len(PESOS_PERFIL) else PESOS_PERFIL
 
 # Nudge fijo (puntos de peso, no puntos de Score) sobre los pesos del perfil elegido, antes de
 # la redistribución por factores faltantes de más abajo. "mediano" no ajusta nada — es
@@ -46,10 +73,11 @@ AJUSTE_PLAZO: dict[PlazoInversion, dict[str, float]] = {
 }
 
 
-def _pesos_ajustados(perfil: PerfilInversor, plazo: PlazoInversion) -> dict[str, float]:
-    """Pesos del perfil con el nudge de plazo aplicado y renormalizados a suma 1 — el nudge
-    desplaza peso relativo entre factores, no debe cambiar cuánto pesa el conjunto."""
-    w = PESOS_PERFIL[perfil]
+def _pesos_ajustados(perfil: PerfilInversor, plazo: PlazoInversion, pesos_base: dict[PerfilInversor, PesosPerfil]) -> dict[str, float]:
+    """Pesos del perfil (ya resueltos por el llamador, ver pesos_vigentes) con el nudge de
+    plazo aplicado y renormalizados a suma 1 — el nudge desplaza peso relativo entre factores,
+    no debe cambiar cuánto pesa el conjunto."""
+    w = pesos_base[perfil]
     ajuste = AJUSTE_PLAZO[plazo]
     base = {
         "rendimiento": max(0.0, w.rendimiento + ajuste["rendimiento"]),
@@ -68,9 +96,15 @@ def compute_score(
     estabilidad: float | None,
     perfil: PerfilInversor,
     plazo: PlazoInversion = "mediano",
+    pesos_base: dict[PerfilInversor, PesosPerfil] | None = None,
 ) -> int:
     """Aplica la ponderación del perfil (matizada por el plazo de inversión, ver AJUSTE_PLAZO)
     sobre los factores ya calculados.
+
+    `pesos_base`: pesos ya resueltos por el llamador vía pesos_vigentes(db) — se recibe
+    resuelto, no se consulta la base acá, para no repetir la misma query una vez por
+    instrumento en un listado. Por defecto (sin threadear la base, ej. tests o scoring-historico
+    de un solo ticker) cae a la hipótesis de partida estática PESOS_PERFIL.
 
     Instrumentos sin Rendimiento calculable (TAMAR, DUAL, dólar-linked) o sin Estabilidad
     calculable todavía (menos de 20 ruedas de historial de precio, ver Servicio de IA)
@@ -80,7 +114,7 @@ def compute_score(
     que es exactamente lo que no debe pasar: cuanto más factores falten, más se acerca esta
     fórmula a un promedio, pero nunca ignora la ponderación mientras quede más de un factor.
     """
-    w = _pesos_ajustados(perfil, plazo)
+    w = _pesos_ajustados(perfil, plazo, pesos_base or PESOS_PERFIL)
     factores = {
         "rendimiento": (rendimiento, w["rendimiento"]),
         "riesgo": (riesgo, w["riesgo"]),

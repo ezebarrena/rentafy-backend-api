@@ -26,7 +26,7 @@ from ..schemas import (
     PuntoHistorico,
     PuntoScore,
 )
-from ..scoring import compute_score
+from ..scoring import compute_score, pesos_vigentes
 from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 DIAS_SCORING_HISTORICO = 20
@@ -150,10 +150,11 @@ def listar_instrumentos(
     tickers = [i.ticker for i in instrumentos]
     cotizaciones = ultimas_cotizaciones(db, tickers)
     scorings = ultimos_scoring(db, tickers)
+    pesos_base = pesos_vigentes(db)
     items = [
         item
         for item in (
-            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
+            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker), pesos_base=pesos_base)
             for i in instrumentos
         )
         if item is not None
@@ -380,6 +381,7 @@ def instrumentos_consistentes(
         i.ticker: i
         for i in db.query(Instrumento).filter(Instrumento.ticker.in_(por_ticker.keys())).all()
     }
+    pesos_base = pesos_vigentes(db)
 
     candidatos: list[InstrumentoConsistente] = []
     for ticker, filas_ticker in por_ticker.items():
@@ -389,7 +391,8 @@ def instrumentos_consistentes(
         if instrumento is None:
             continue
         scores = [
-            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo) for f in filas_ticker
+            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base)
+            for f in filas_ticker
         ]
         candidatos.append(
             InstrumentoConsistente(
@@ -424,6 +427,7 @@ def instrumentos_en_alza(
         i.ticker: i
         for i in db.query(Instrumento).filter(Instrumento.ticker.in_(por_ticker.keys())).all()
     }
+    pesos_base = pesos_vigentes(db)
 
     candidatos: list[InstrumentoEnAlza] = []
     for ticker, filas_ticker in por_ticker.items():
@@ -433,7 +437,8 @@ def instrumentos_en_alza(
         if instrumento is None:
             continue
         scores = [
-            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo) for f in filas_ticker
+            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base)
+            for f in filas_ticker
         ]
         pendiente = _pendiente(scores)
         if pendiente <= 0:
@@ -514,10 +519,11 @@ def scoring_historico(
         .all()
     )
     filas.reverse()  # ascendente para el gráfico, igual que /historico
+    pesos_base = pesos_vigentes(db)
     return [
         PuntoScore(
             fecha=f.fecha_calculo,
-            score=compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo),
+            score=compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base),
         )
         for f in filas
     ]
@@ -534,7 +540,7 @@ def detalle_instrumento(
     if instrumento is None:
         raise HTTPException(404, f"No se encontró el instrumento «{ticker}»")
     rem_inflacion_12m = obtener_rem_inflacion(db) if instrumento.subtipo == "BONCER" else None
-    detalle = to_detail(instrumento, perfil, plazo, rem_inflacion_12m)
+    detalle = to_detail(instrumento, perfil, plazo, rem_inflacion_12m, pesos_vigentes(db))
     if detalle is None:
         raise HTTPException(409, f"El instrumento «{ticker}» todavía no tiene una cotización cargada")
     return detalle

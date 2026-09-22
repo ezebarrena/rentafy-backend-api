@@ -10,7 +10,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .models_financiera import Cotizacion, Instrumento, Scoring
-from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, PerfilInversor, PlazoInversion
+from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, PerfilInversor, PesosPerfil, PlazoInversion
 from .scoring import compute_score
 
 
@@ -58,10 +58,15 @@ def ultimos_scoring(db: Session, tickers: list[str]) -> dict[str, Scoring]:
     return {s.instrumento_ticker: s for s in filas}
 
 
-def _score(sc, perfil: PerfilInversor, plazo: PlazoInversion = "mediano") -> float | None:
+def _score(
+    sc,
+    perfil: PerfilInversor,
+    plazo: PlazoInversion = "mediano",
+    pesos_base: dict[PerfilInversor, PesosPerfil] | None = None,
+) -> float | None:
     if sc is None:
         return None
-    return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo)
+    return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo, pesos_base)
 
 
 def to_list_item(
@@ -70,6 +75,7 @@ def to_list_item(
     plazo: PlazoInversion = "mediano",
     cot: Cotizacion | None = None,
     sc: Scoring | None = None,
+    pesos_base: dict[PerfilInversor, PesosPerfil] | None = None,
 ) -> InstrumentoListItem | None:
     """`cot`/`sc`: si el llamador ya los resolvió en batch (ver `ultimas_cotizaciones`/
     `ultimos_scoring`, para listados de muchos instrumentos), se usan tal cual — si no, cae
@@ -97,7 +103,7 @@ def to_list_item(
         riesgo=instrumento.riesgo,
         liquidez=instrumento.liquidez,
         resumen=instrumento.resumen,
-        score=_score(sc, perfil, plazo),
+        score=_score(sc, perfil, plazo, pesos_base),
     )
 
 
@@ -115,6 +121,7 @@ def to_detail(
     perfil: PerfilInversor,
     plazo: PlazoInversion = "mediano",
     rem_inflacion_12m: float | None = None,
+    pesos_base: dict[PerfilInversor, PesosPerfil] | None = None,
 ) -> InstrumentoOut | None:
     cot = _ultima_cotizacion(instrumento)
     if cot is None:
@@ -162,5 +169,5 @@ def to_detail(
         ),
         flujos=[FlujoFondo(fecha=f.fecha, tipo=f.tipo, importe=f.importe) for f in instrumento.flujos],
         resumen=instrumento.resumen,
-        score=_score(sc, perfil, plazo),
+        score=_score(sc, perfil, plazo, pesos_base),
     )

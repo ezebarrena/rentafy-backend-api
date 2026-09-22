@@ -10,9 +10,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..deps import get_db_financiera
-from ..models_financiera import Instrumento
+from ..models_financiera import Instrumento, Modelo
 from ..schemas import PaginatedInstrumentos, PerfilInversor, PlazoInversion, ScoreRentafyPesosOut
-from ..scoring import PESOS_PERFIL
+from ..scoring import pesos_vigentes
 from ..serializers import to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 router = APIRouter(tags=["rankings"])
@@ -36,10 +36,11 @@ def ranking(
     tickers = [i.ticker for i in instrumentos]
     cotizaciones = ultimas_cotizaciones(db, tickers)
     scorings = ultimos_scoring(db, tickers)
+    pesos_base = pesos_vigentes(db)
     items = [
         item
         for item in (
-            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
+            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker), pesos_base=pesos_base)
             for i in instrumentos
         )
         if item is not None
@@ -55,9 +56,11 @@ def ranking(
 
 @router.get("/score-rentafy/pesos", response_model=ScoreRentafyPesosOut)
 def pesos_por_perfil(db: Session = Depends(get_db_financiera)):
-    """RF-34: pesos vigentes por perfil, usados por la página "¿Qué es el Score Rentafy?"."""
-    from ..models_financiera import Modelo
+    """RF-34: pesos vigentes por perfil, usados por la página "¿Qué es el Score Rentafy?".
 
+    Antes de esta versión devolvía siempre el diccionario estático PESOS_PERFIL sin importar
+    el modeloId reportado — un bug real: el modeloId ya reflejaba el Modelo activo, pero los
+    pesos no. Ahora usa pesos_vigentes(), la misma fuente que compute_score()."""
     modelo_activo = db.query(Modelo).filter(Modelo.activo == True).first()  # noqa: E712
     modelo_id = modelo_activo.id if modelo_activo else "v1.4.0"
-    return ScoreRentafyPesosOut(modeloId=modelo_id, pesos=PESOS_PERFIL)
+    return ScoreRentafyPesosOut(modeloId=modelo_id, pesos=pesos_vigentes(db))

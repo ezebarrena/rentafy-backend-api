@@ -13,6 +13,7 @@ from ..deps import get_current_user, get_db_financiera, get_db_no_financiera
 from ..models_financiera import Instrumento
 from ..models_no_financiera import Favorito, Usuario
 from ..schemas import InstrumentoListItem, PerfilInversor, PlazoInversion
+from ..scoring import pesos_vigentes
 from ..serializers import to_list_item
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
@@ -27,7 +28,12 @@ def obtener_watchlist(
 ):
     tickers = [f.instrumento_ticker for f in usuario.favoritos]
     instrumentos = db_financiera.query(Instrumento).filter(Instrumento.ticker.in_(tickers)).all()
-    return [item for item in (to_list_item(i, perfil, plazo) for i in instrumentos) if item is not None]
+    pesos_base = pesos_vigentes(db_financiera)
+    return [
+        item
+        for item in (to_list_item(i, perfil, plazo, pesos_base=pesos_base) for i in instrumentos)
+        if item is not None
+    ]
 
 
 @router.post("/{ticker}", status_code=204)
