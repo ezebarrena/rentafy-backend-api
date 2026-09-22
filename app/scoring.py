@@ -12,8 +12,13 @@ en el factor Rendimiento del Servicio de IA. Un horizonte corto no puede darse e
 esperar a que un instrumento volátil rinda lo esperado, así que le corre peso a
 riesgo/estabilidad; un horizonte largo puede tolerar más vaivén a cambio de mejor rendimiento
 esperado, así que hace lo inverso. Cortes de años (ver PlazoInversion): corto ≤1 año,
-mediano 1-5 años, largo >5 años — elegidos mirando la distribución real de vencimientos del
-catálogo (percentiles ~25/mediana/~75), no un criterio arbitrario.
+mediano 1-3 años, largo >3 años.
+
+Nota: estos cortes son hoy puramente descriptivos (se muestran en la UI de Perfil) — el
+ajuste de pesos de abajo se aplica según el plazo que el usuario ELIGE, no según una
+comparación automática entre el vencimiento de cada instrumento y esos cortes. Esa
+comparación (penalizar un descalce plazo-vencimiento) quedó fuera de esta iteración a
+propósito, ver análisis de factibilidad.
 """
 
 from .schemas import PerfilInversor, PesosPerfil, PlazoInversion

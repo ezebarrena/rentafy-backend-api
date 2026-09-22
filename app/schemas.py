@@ -12,7 +12,7 @@ NivelRiesgo = Literal["Bajo", "Medio", "Alto"]
 NivelLiquidez = Literal["Alta", "Media", "Baja"]
 PerfilInversor = Literal["conservador", "moderado", "agresivo"]
 # Horizonte de inversión del usuario — corte por años de vencimiento: corto ≤1 año,
-# mediano 1-5 años, largo >5 años (ver scoring.py, AJUSTE_PLAZO).
+# mediano 1-3 años, largo >3 años (ver scoring.py, AJUSTE_PLAZO).
 PlazoInversion = Literal["corto", "mediano", "largo"]
 
 
