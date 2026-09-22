@@ -7,7 +7,7 @@ registrar (ver README, sección "Alcance de este backend").
 
 from datetime import datetime, date
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import BaseFinanciera
@@ -48,6 +48,13 @@ class Cotizacion(BaseFinanciera):
     """Variables de mercado (crudas) y calculadas, por instrumento y fecha."""
 
     __tablename__ = "cotizaciones"
+    # Cubre el filtro + order_by de ultimas_cotizaciones/ultimos_scoring (DISTINCT ON) y de
+    # /historico — sin esto, la tabla física no tenía ningún índice más allá de la PK `id`, y
+    # crece un registro por instrumento por día hábil, para siempre. Nota: create_all() no
+    # altera una tabla ya existente, así que en una base ya desplegada esto requiere correr a
+    # mano `CREATE INDEX CONCURRENTLY ix_cotizaciones_ticker_fecha ON cotizaciones
+    # (instrumento_ticker, fecha);` — acá solo queda declarado para bases nuevas.
+    __table_args__ = (Index("ix_cotizaciones_ticker_fecha", "instrumento_ticker", "fecha"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     instrumento_ticker: Mapped[str] = mapped_column(ForeignKey("instrumentos.ticker"))
@@ -96,6 +103,9 @@ class Scoring(BaseFinanciera):
     """Los cuatro factores calculados por el Servicio de IA, sin combinar en un único valor."""
 
     __tablename__ = "scoring"
+    # Mismo criterio que el índice de Cotizacion (ver su comentario): cubre ultimos_scoring
+    # (DISTINCT ON), la window function de /consistentes y /en-alza, y /scoring-historico.
+    __table_args__ = (Index("ix_scoring_ticker_fecha_calculo", "instrumento_ticker", "fecha_calculo"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     instrumento_ticker: Mapped[str] = mapped_column(ForeignKey("instrumentos.ticker"))

@@ -14,7 +14,7 @@ from ..models_financiera import Instrumento
 from ..models_no_financiera import Favorito, Usuario
 from ..schemas import InstrumentoListItem, PerfilInversor, PlazoInversion
 from ..scoring import pesos_vigentes
-from ..serializers import to_list_item
+from ..serializers import to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
@@ -28,10 +28,21 @@ def obtener_watchlist(
 ):
     tickers = [f.instrumento_ticker for f in usuario.favoritos]
     instrumentos = db_financiera.query(Instrumento).filter(Instrumento.ticker.in_(tickers)).all()
+    # Antes de esto, to_list_item() se llamaba sin cot=/sc=, así que caía al fallback vía
+    # instrumento.cotizaciones/instrumento.scores (relationship) — un N+1 real: cada acceso
+    # dispara una query lazy-load que trae el HISTORIAL COMPLETO del ticker solo para quedarse
+    # con el más reciente en Python. Mismo patrón batch que ya usan instrumentos.py/rankings.py.
+    cotizaciones = ultimas_cotizaciones(db_financiera, tickers)
+    scorings = ultimos_scoring(db_financiera, tickers)
     pesos_base = pesos_vigentes(db_financiera)
     return [
         item
-        for item in (to_list_item(i, perfil, plazo, pesos_base=pesos_base) for i in instrumentos)
+        for item in (
+            to_list_item(
+                i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker), pesos_base=pesos_base
+            )
+            for i in instrumentos
+        )
         if item is not None
     ]
 

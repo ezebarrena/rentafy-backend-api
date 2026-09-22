@@ -125,14 +125,3 @@ def compute_score(
     peso_total = sum(peso for _, peso in presentes)
     score = sum(valor * peso for valor, peso in presentes) / peso_total
     return round(score)
-
-
-def score_label(score: float) -> str:
-    """Misma escala de 4 tramos que el frontend (90/75/50, ver ScoreBadge.tsx)."""
-    if score >= 90:
-        return "Excelente"
-    if score >= 75:
-        return "Muy bueno"
-    if score >= 50:
-        return "Bueno"
-    return "Regular"

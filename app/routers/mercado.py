@@ -1,11 +1,9 @@
 """RF-07/RF-11/RF-12: obtención de datos financieros desde fuentes externas, con manejo de
 fallos que preserva el último valor disponible (RNF-09).
 
-Este router concentra las llamadas salientes a data912 y ArgentinaDatos, dos de las tres
-fuentes descriptas en chapter04.tex. La integración con la API de compararfondos.com.ar (la
-fuente central para TIR/duration/flujos según la tesis) queda pendiente: no se relevó un
-endpoint público estable durante esta sesión, y por ahora esos datos los provee el seed
-(ver seed.py) en lugar de una consulta en vivo.
+Este router concentra las llamadas salientes a ArgentinaDatos (inflación/REM) y dispara la
+integración con compararfondos.com.ar (la fuente central para TIR/duration/flujos, ver
+ingest.py) vía POST /mercado/importar/compararfondos.
 """
 
 from datetime import datetime
@@ -21,28 +19,12 @@ from ..schemas import IndicadorMercado
 
 router = APIRouter(prefix="/mercado", tags=["mercado"])
 
-DATA912_BONDS_URL = "https://data912.com/live/arg_bonds"
 ARGENTINADATOS_INFLACION_URL = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion"
 
 _MESES_ES = [
     "ene.", "feb.", "mar.", "abr.", "may.", "jun.",
     "jul.", "ago.", "sep.", "oct.", "nov.", "dic.",
 ]
-
-
-@router.get("/bonos/{symbol}")
-def precio_bono(symbol: str):
-    """Cotización en vivo de un bono/ON/letra vía data912 (sin TIR/duration, ver docstring)."""
-    try:
-        response = requests.get(DATA912_BONDS_URL, timeout=5)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(502, f"Fuente externa (data912) no disponible: {exc}") from exc
-
-    for bond in response.json():
-        if bond["symbol"] == symbol.upper():
-            return {"symbol": bond["symbol"], "price": bond["c"], "fuente": "data912"}
-    raise HTTPException(404, f"No se encontró el bono «{symbol}» en data912")
 
 
 def _inflacion_mensual() -> dict:
@@ -112,14 +94,18 @@ def indicadores_mercado(db: Session = Depends(get_db_financiera)):
     (cadencia mensual en la fuente — no justifica cachear). Dólar CCL/MEP y Riesgo País se leen
     de la cache que mantiene al día el job de las 18:05 (ver financial_utils.py) en vez de
     pegarle a ArgentinaDatos en cada carga del Dashboard. RNF-09: ante la falla de una fuente en
-    vivo se conserva el valor de referencia hardcodeado más abajo."""
+    vivo (o una cache todavía sin fila) se muestra "—" en vez de un valor inventado."""
 
+    # "—" en vez de un número fijo: un valor de referencia hardcodeado (ej. "21,8%") queda cada
+    # vez más viejo y podría mostrarse como si fuera el dato real. Este fallback solo se ve si
+    # la fuente en vivo falla (inflación/REM) o la cache todavía no tiene fila (Dólar/Riesgo
+    # País) — mejor mostrar explícitamente "sin dato" que un número que parece actual y no lo es.
     indicadores = [
-        IndicadorMercado(label="Inflación esperada 12 meses", valor="21,8%", variacion="Último dato", tendencia="neutral"),
-        IndicadorMercado(label="Inflación mensual", valor="2,8%", variacion="Último dato", tendencia="neutral"),
-        IndicadorMercado(label="Dólar CCL", valor="$ 1.489,40", variacion="+0,42%", tendencia="positiva"),
-        IndicadorMercado(label="Dólar MEP", valor="$ 1.487,50", variacion="+0,42%", tendencia="positiva"),
-        IndicadorMercado(label="Riesgo País", valor="450", variacion="-12 pts", tendencia="positiva"),
+        IndicadorMercado(label="Inflación esperada 12 meses", valor="—", variacion="Sin datos", tendencia="neutral"),
+        IndicadorMercado(label="Inflación mensual", valor="—", variacion="Sin datos", tendencia="neutral"),
+        IndicadorMercado(label="Dólar CCL", valor="—", variacion="Sin datos", tendencia="neutral"),
+        IndicadorMercado(label="Dólar MEP", valor="—", variacion="Sin datos", tendencia="neutral"),
+        IndicadorMercado(label="Riesgo País", valor="—", variacion="Sin datos", tendencia="neutral"),
     ]
 
     try:

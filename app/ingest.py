@@ -179,6 +179,26 @@ def importar(db: Session) -> dict:
     excluidos_fuera_de_alcance = 0
     tipos_no_mapeados: set[str] = set()
 
+    # Los 3 pasos de abajo eran, antes de esta versión, una query POR BONO dentro del loop
+    # (~275 iteraciones): un DELETE de Cotizacion, uno de FlujoFondo, y un SELECT para chequear
+    # si ya tiene Scoring. Se resuelven acá en 3 queries totales, antes de entrar al loop.
+    tickers_bonds = [b["ticker"] for b in bonds if b["tipo"] not in _TIPOS_EXCLUIDOS]
+    if tickers_bonds:
+        db.query(Cotizacion).filter(
+            Cotizacion.instrumento_ticker.in_(tickers_bonds), Cotizacion.fecha == hoy
+        ).delete(synchronize_session=False)
+        db.query(FlujoFondo).filter(FlujoFondo.instrumento_ticker.in_(tickers_bonds)).delete(
+            synchronize_session=False
+        )
+        tickers_con_scoring = {
+            fila[0]
+            for fila in db.query(Scoring.instrumento_ticker)
+            .filter(Scoring.instrumento_ticker.in_(tickers_bonds))
+            .distinct()
+        }
+    else:
+        tickers_con_scoring = set()
+
     for bond in bonds:
         if bond["tipo"] in _TIPOS_EXCLUIDOS:
             excluidos_fuera_de_alcance += 1
@@ -211,10 +231,8 @@ def importar(db: Session) -> dict:
         instrumento.resumen = instrumento.resumen or ""
         instrumento.activo = True  # reaparecer en la fuente reactiva un instrumento inactivo
 
-        # Reemplaza la cotización del día (idempotente si se corre más de una vez en la jornada).
-        db.query(Cotizacion).filter(
-            Cotizacion.instrumento_ticker == ticker, Cotizacion.fecha == hoy
-        ).delete()
+        # La cotización del día ya se borró en el batch de arriba (idempotente si se corre más
+        # de una vez en la jornada) — acá solo se inserta la nueva.
         db.add(
             Cotizacion(
                 instrumento_ticker=ticker,
@@ -237,8 +255,8 @@ def importar(db: Session) -> dict:
             )
         )
 
-        # Reemplaza el cronograma de flujos completo (la fuente ya lo entrega proyectado a futuro).
-        db.query(FlujoFondo).filter(FlujoFondo.instrumento_ticker == ticker).delete()
+        # El cronograma de flujos anterior ya se borró en el batch de arriba (la fuente entrega
+        # el cronograma completo proyectado a futuro, se reemplaza entero).
         flujos = bond.get("flujos") or []
         for flujo in flujos:
             es_ultimo = flujo is flujos[-1]
@@ -251,9 +269,10 @@ def importar(db: Session) -> dict:
                 )
             )
 
-        # Placeholder de prueba: solo si el instrumento todavía no tiene ningún Scoring (nunca
-        # pisa un Scoring real, como el de los 19 instrumentos del seed original).
-        if not db.query(Scoring).filter(Scoring.instrumento_ticker == ticker).first():
+        # Placeholder de prueba: solo si el instrumento todavía no tenía ningún Scoring ANTES
+        # de este batch de importación (nunca pisa un Scoring real, como el de los 19
+        # instrumentos del seed original) — tickers_con_scoring se calculó una sola vez arriba.
+        if ticker not in tickers_con_scoring:
             rendimiento, riesgo, liquidez, estabilidad = _score_aleatorio_estatico(ticker)
             db.add(
                 Scoring(
@@ -266,6 +285,7 @@ def importar(db: Session) -> dict:
                     estabilidad=estabilidad,
                 )
             )
+            tickers_con_scoring.add(ticker)  # guarda contra un ticker duplicado en el mismo `bonds`
             con_score_placeholder += 1
 
         procesados += 1

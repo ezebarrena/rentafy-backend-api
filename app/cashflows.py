@@ -3,7 +3,7 @@ de flujos de fondos plausible según el tipo de instrumento, usado únicamente p
 seed de desarrollo (ver seed.py). En producción, FLUJO_FONDO se completa desde la fuente
 externa de compararfondos.com.ar (ver chapter04.tex, "Modelo de datos y fuentes de información")."""
 
-from datetime import date, timedelta
+from datetime import date
 
 HOY = date(2026, 8, 25)
 
