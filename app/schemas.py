@@ -80,6 +80,20 @@ class InstrumentoOpcion(BaseModel):
     moneda: Moneda
 
 
+class InstrumentoConsistente(BaseModel):
+    """Para el bloque "Scores más consistentes" del Dashboard (ver GET /instrumentos/consistentes):
+    instrumentos cuyo Score viene siendo alto Y estable en las últimas ruedas, no solo el de
+    hoy — eso ya lo cubre "Oportunidades destacadas"/"La oportunidad de hoy"."""
+
+    ticker: str
+    nombre: str
+    tipo: TipoInstrumento
+    subtipo: Optional[str] = None
+    scorePromedio: float
+    desvio: float
+    scores: list[int]  # últimas ruedas con Scoring calculado, orden cronológico (viejo → nuevo)
+
+
 class InstrumentoListItem(BaseModel):
     """Versión liviana usada en listados/rankings (sin flujos)."""
 
