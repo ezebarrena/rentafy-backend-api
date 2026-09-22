@@ -336,6 +336,14 @@ def _historial_scoring_reciente(db: Session, dias: int) -> dict[str, list]:
     return por_ticker
 
 
+def _salto_maximo(scores: list[int]) -> float:
+    """Mayor |diferencia| entre dos ruedas consecutivas de la ventana. El desvío estándar de
+    toda la ventana diluye un salto puntual entre el resto de valores parejos (ej.
+    80/90/80/90/90/90/90/90/90/70: stdev ~6.6 pese a una caída de 20 puntos en dos ruedas) — el
+    salto máximo lo penaliza directo, sin promediarlo con el resto."""
+    return max(abs(b - a) for a, b in zip(scores, scores[1:]))
+
+
 def _pendiente(scores: list[int]) -> float:
     """Pendiente de la regresión lineal simple (mínimos cuadrados, sin numpy) de `scores`
     contra el número de rueda (0, 1, 2, ...) — puntos de Score que gana (o pierde) en
@@ -354,9 +362,11 @@ def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: 
     """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene siendo alto Y estable en las
     últimas {CONSISTENCIA_DIAS} ruedas — a diferencia de "Oportunidades destacadas"/"La
     oportunidad de hoy", que solo miran el Score de hoy, acá importa que se sostenga día tras
-    día. Se ordena por promedio menos desvío estándar: castiga la volatilidad tanto como
-    premia el nivel, así un 89/90/88/91/90 (constante) le gana a un 60/95/60/95/95 (parejo en
-    promedio pero errático) aunque compartan promedio similar. Requiere al menos
+    día. Se ordena por promedio menos el mayor salto entre dos ruedas consecutivas (ver
+    _salto_maximo): un 89/90/88/91/90 (sin sobresaltos) le gana a un 80/90/80/90/90/90/90/90/
+    90/70 (promedio parecido, pero con una caída de 20 puntos en dos ruedas) — el desvío
+    estándar de toda la ventana diluye ese tipo de salto puntual entre el resto de valores
+    parejos, así que no alcanza como única penalización. Requiere al menos
     {CONSISTENCIA_MINIMO_DIAS} ruedas con Scoring calculado — con menos que eso no hay
     suficiente historial para hablar de "consistencia" todavía."""
     por_ticker = _historial_scoring_reciente(db, CONSISTENCIA_DIAS)
@@ -383,11 +393,12 @@ def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: 
                 subtipo=instrumento.subtipo,
                 scorePromedio=round(statistics.mean(scores), 1),
                 desvio=round(statistics.pstdev(scores), 1),
+                saltoMaximo=_salto_maximo(scores),
                 scores=scores,
             )
         )
 
-    candidatos.sort(key=lambda c: c.scorePromedio - c.desvio, reverse=True)
+    candidatos.sort(key=lambda c: c.scorePromedio - c.saltoMaximo, reverse=True)
     return candidatos[:CONSISTENCIA_TOP_N]
 
 

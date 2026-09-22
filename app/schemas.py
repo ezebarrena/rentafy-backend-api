@@ -91,6 +91,7 @@ class InstrumentoConsistente(BaseModel):
     subtipo: Optional[str] = None
     scorePromedio: float
     desvio: float
+    saltoMaximo: float  # mayor |diferencia| entre dos ruedas consecutivas de la ventana
     scores: list[int]  # últimas ruedas con Scoring calculado, orden cronológico (viejo → nuevo)
 
 
