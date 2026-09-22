@@ -10,7 +10,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .models_financiera import Cotizacion, Instrumento, Scoring
-from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, PerfilInversor
+from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, PerfilInversor, PlazoInversion
 from .scoring import compute_score
 
 
@@ -58,15 +58,16 @@ def ultimos_scoring(db: Session, tickers: list[str]) -> dict[str, Scoring]:
     return {s.instrumento_ticker: s for s in filas}
 
 
-def _score(sc, perfil: PerfilInversor) -> float | None:
+def _score(sc, perfil: PerfilInversor, plazo: PlazoInversion = "mediano") -> float | None:
     if sc is None:
         return None
-    return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil)
+    return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo)
 
 
 def to_list_item(
     instrumento: Instrumento,
     perfil: PerfilInversor,
+    plazo: PlazoInversion = "mediano",
     cot: Cotizacion | None = None,
     sc: Scoring | None = None,
 ) -> InstrumentoListItem | None:
@@ -96,7 +97,7 @@ def to_list_item(
         riesgo=instrumento.riesgo,
         liquidez=instrumento.liquidez,
         resumen=instrumento.resumen,
-        score=_score(sc, perfil),
+        score=_score(sc, perfil, plazo),
     )
 
 
@@ -110,7 +111,10 @@ def _tir_nominal_estimada(instrumento: Instrumento, tir: float | None, rem_infla
 
 
 def to_detail(
-    instrumento: Instrumento, perfil: PerfilInversor, rem_inflacion_12m: float | None = None
+    instrumento: Instrumento,
+    perfil: PerfilInversor,
+    plazo: PlazoInversion = "mediano",
+    rem_inflacion_12m: float | None = None,
 ) -> InstrumentoOut | None:
     cot = _ultima_cotizacion(instrumento)
     if cot is None:
@@ -158,5 +162,5 @@ def to_detail(
         ),
         flujos=[FlujoFondo(fecha=f.fecha, tipo=f.tipo, importe=f.importe) for f in instrumento.flujos],
         resumen=instrumento.resumen,
-        score=_score(sc, perfil),
+        score=_score(sc, perfil, plazo),
     )

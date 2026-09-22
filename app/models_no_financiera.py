@@ -28,6 +28,9 @@ class Usuario(BaseNoFinanciera):
     perfiles: Mapped[list["PerfilInversorHistorial"]] = relationship(
         back_populates="usuario", cascade="all, delete-orphan"
     )
+    plazos: Mapped[list["PlazoInversionHistorial"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
     favoritos: Mapped[list["Favorito"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
 
 
@@ -42,6 +45,20 @@ class PerfilInversorHistorial(BaseNoFinanciera):
     actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     usuario: Mapped["Usuario"] = relationship(back_populates="perfiles")
+
+
+class PlazoInversionHistorial(BaseNoFinanciera):
+    """Horizonte de inversión del usuario (corto/mediano/largo) — mismo patrón que
+    PerfilInversorHistorial: un registro por cambio, el vigente es el de fecha más reciente."""
+
+    __tablename__ = "plazos_inversion"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
+    plazo: Mapped[str] = mapped_column(String(20))  # corto | mediano | largo
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="plazos")
 
 
 class Favorito(BaseNoFinanciera):

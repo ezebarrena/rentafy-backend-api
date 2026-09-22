@@ -11,6 +11,9 @@ Moneda = Literal["ARS", "USD"]
 NivelRiesgo = Literal["Bajo", "Medio", "Alto"]
 NivelLiquidez = Literal["Alta", "Media", "Baja"]
 PerfilInversor = Literal["conservador", "moderado", "agresivo"]
+# Horizonte de inversión del usuario — corte por años de vencimiento: corto ≤1 año,
+# mediano 1-5 años, largo >5 años (ver scoring.py, AJUSTE_PLAZO).
+PlazoInversion = Literal["corto", "mediano", "largo"]
 
 
 class FactoresScore(BaseModel):
@@ -181,10 +184,15 @@ class UsuarioOut(BaseModel):
     apellido: str
     email: EmailStr
     perfilInversor: PerfilInversor
+    plazoInversion: PlazoInversion
 
 
 class PerfilInversorUpdate(BaseModel):
     perfil: PerfilInversor
+
+
+class PlazoInversionUpdate(BaseModel):
+    plazo: PlazoInversion
 
 
 class UsuarioNombreUpdate(BaseModel):

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..deps import get_current_user, get_db_financiera, get_db_no_financiera
 from ..models_financiera import Instrumento
 from ..models_no_financiera import Favorito, Usuario
-from ..schemas import InstrumentoListItem, PerfilInversor
+from ..schemas import InstrumentoListItem, PerfilInversor, PlazoInversion
 from ..serializers import to_list_item
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
@@ -21,12 +21,13 @@ router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 @router.get("", response_model=list[InstrumentoListItem])
 def obtener_watchlist(
     perfil: PerfilInversor = "moderado",
+    plazo: PlazoInversion = "mediano",
     usuario: Usuario = Depends(get_current_user),
     db_financiera: Session = Depends(get_db_financiera),
 ):
     tickers = [f.instrumento_ticker for f in usuario.favoritos]
     instrumentos = db_financiera.query(Instrumento).filter(Instrumento.ticker.in_(tickers)).all()
-    return [item for item in (to_list_item(i, perfil) for i in instrumentos) if item is not None]
+    return [item for item in (to_list_item(i, perfil, plazo) for i in instrumentos) if item is not None]
 
 
 @router.post("/{ticker}", status_code=204)

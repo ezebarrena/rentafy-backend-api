@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from ..config import GOOGLE_CLIENT_ID
 from ..deps import get_current_user, get_db_no_financiera
-from ..models_no_financiera import PerfilInversorHistorial, Usuario
+from ..models_no_financiera import PerfilInversorHistorial, PlazoInversionHistorial, Usuario
 from ..schemas import (
     GoogleLogin,
     PerfilInversorUpdate,
+    PlazoInversionUpdate,
     TokenOut,
     UsuarioLogin,
     UsuarioNombreUpdate,
@@ -30,6 +31,12 @@ def _perfil_vigente(usuario: Usuario) -> str:
     return max(usuario.perfiles, key=lambda p: p.actualizado_en).perfil
 
 
+def _plazo_vigente(usuario: Usuario) -> str:
+    if not usuario.plazos:
+        return "mediano"
+    return max(usuario.plazos, key=lambda p: p.actualizado_en).plazo
+
+
 def _to_out(usuario: Usuario) -> UsuarioOut:
     return UsuarioOut(
         id=usuario.id,
@@ -37,6 +44,7 @@ def _to_out(usuario: Usuario) -> UsuarioOut:
         apellido=usuario.apellido,
         email=usuario.email,
         perfilInversor=_perfil_vigente(usuario),
+        plazoInversion=_plazo_vigente(usuario),
     )
 
 
@@ -56,6 +64,7 @@ def registrar(datos: UsuarioRegistro, db: Session = Depends(get_db_no_financiera
     db.refresh(usuario)
 
     db.add(PerfilInversorHistorial(usuario_id=usuario.id, perfil="moderado"))
+    db.add(PlazoInversionHistorial(usuario_id=usuario.id, plazo="mediano"))
     db.commit()
     db.refresh(usuario)
     return _to_out(usuario)
@@ -98,6 +107,7 @@ def login_google(datos: GoogleLogin, db: Session = Depends(get_db_no_financiera)
             db.commit()
             db.refresh(usuario)
             db.add(PerfilInversorHistorial(usuario_id=usuario.id, perfil="moderado"))
+            db.add(PlazoInversionHistorial(usuario_id=usuario.id, plazo="mediano"))
         db.commit()
         db.refresh(usuario)
 
@@ -127,6 +137,16 @@ def actualizar_perfil_inversor(
     datos: PerfilInversorUpdate, usuario: Usuario = Depends(get_current_user), db: Session = Depends(get_db_no_financiera)
 ):
     db.add(PerfilInversorHistorial(usuario_id=usuario.id, perfil=datos.perfil))
+    db.commit()
+    db.refresh(usuario)
+    return _to_out(usuario)
+
+
+@router.put("/me/plazo-inversion", response_model=UsuarioOut)
+def actualizar_plazo_inversion(
+    datos: PlazoInversionUpdate, usuario: Usuario = Depends(get_current_user), db: Session = Depends(get_db_no_financiera)
+):
+    db.add(PlazoInversionHistorial(usuario_id=usuario.id, plazo=datos.plazo))
     db.commit()
     db.refresh(usuario)
     return _to_out(usuario)

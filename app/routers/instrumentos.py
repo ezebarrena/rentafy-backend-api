@@ -21,6 +21,7 @@ from ..schemas import (
     InstrumentoOut,
     PaginatedInstrumentos,
     PerfilInversor,
+    PlazoInversion,
     PuntoCurva,
     PuntoHistorico,
     PuntoScore,
@@ -102,6 +103,7 @@ _LIQUIDEZ_ORDEN = {"Baja": 0, "Media": 1, "Alta": 2}
 def listar_instrumentos(
     db: Session = Depends(get_db_financiera),
     perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
     tipo: Optional[str] = None,
     subtipo: Optional[str] = None,
     moneda: Optional[str] = None,
@@ -151,7 +153,7 @@ def listar_instrumentos(
     items = [
         item
         for item in (
-            to_list_item(i, perfil, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
+            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
             for i in instrumentos
         )
         if item is not None
@@ -358,7 +360,11 @@ def _pendiente(scores: list[int]) -> float:
 
 
 @router.get("/consistentes", response_model=list[InstrumentoConsistente])
-def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")):
+def instrumentos_consistentes(
+    db: Session = Depends(get_db_financiera),
+    perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
+):
     """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene siendo alto Y estable en las
     últimas {CONSISTENCIA_DIAS} ruedas — a diferencia de "Oportunidades destacadas"/"La
     oportunidad de hoy", que solo miran el Score de hoy, acá importa que se sostenga día tras
@@ -383,7 +389,7 @@ def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: 
         if instrumento is None:
             continue
         scores = [
-            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil) for f in filas_ticker
+            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo) for f in filas_ticker
         ]
         candidatos.append(
             InstrumentoConsistente(
@@ -403,7 +409,11 @@ def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: 
 
 
 @router.get("/en-alza", response_model=list[InstrumentoEnAlza])
-def instrumentos_en_alza(db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")):
+def instrumentos_en_alza(
+    db: Session = Depends(get_db_financiera),
+    perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
+):
     """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene subiendo rueda a rueda en las
     últimas {CONSISTENCIA_DIAS} — ni el más alto de hoy ("Oportunidades destacadas") ni el más
     estable ("Scores más consistentes"), sino el que está mejorando. Se mide con la pendiente
@@ -423,7 +433,7 @@ def instrumentos_en_alza(db: Session = Depends(get_db_financiera), perfil: Perfi
         if instrumento is None:
             continue
         scores = [
-            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil) for f in filas_ticker
+            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo) for f in filas_ticker
         ]
         pendiente = _pendiente(scores)
         if pendiente <= 0:
@@ -486,7 +496,10 @@ def historico_instrumento(ticker: str, db: Session = Depends(get_db_financiera))
 
 @router.get("/{ticker}/scoring-historico", response_model=list[PuntoScore])
 def scoring_historico(
-    ticker: str, db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")
+    ticker: str,
+    db: Session = Depends(get_db_financiera),
+    perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
 ):
     """Score de los últimos {DIAS_SCORING_HISTORICO} días con Scoring calculado, según el
     perfil solicitado. No hay ningún dato nuevo que almacenar para esto: Scoring ya acumula
@@ -504,7 +517,7 @@ def scoring_historico(
     return [
         PuntoScore(
             fecha=f.fecha_calculo,
-            score=compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil),
+            score=compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo),
         )
         for f in filas
     ]
@@ -512,13 +525,16 @@ def scoring_historico(
 
 @router.get("/{ticker}", response_model=InstrumentoOut)
 def detalle_instrumento(
-    ticker: str, db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")
+    ticker: str,
+    db: Session = Depends(get_db_financiera),
+    perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
 ):
     instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker.upper()).first()
     if instrumento is None:
         raise HTTPException(404, f"No se encontró el instrumento «{ticker}»")
     rem_inflacion_12m = obtener_rem_inflacion(db) if instrumento.subtipo == "BONCER" else None
-    detalle = to_detail(instrumento, perfil, rem_inflacion_12m)
+    detalle = to_detail(instrumento, perfil, plazo, rem_inflacion_12m)
     if detalle is None:
         raise HTTPException(409, f"El instrumento «{ticker}» todavía no tiene una cotización cargada")
     return detalle

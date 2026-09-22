@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..deps import get_db_financiera
 from ..models_financiera import Instrumento
-from ..schemas import PaginatedInstrumentos, PerfilInversor, ScoreRentafyPesosOut
+from ..schemas import PaginatedInstrumentos, PerfilInversor, PlazoInversion, ScoreRentafyPesosOut
 from ..scoring import PESOS_PERFIL
 from ..serializers import to_list_item, ultimas_cotizaciones, ultimos_scoring
 
@@ -22,6 +22,7 @@ router = APIRouter(tags=["rankings"])
 def ranking(
     db: Session = Depends(get_db_financiera),
     perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
     moneda: str = Query("ARS"),
     tipo: Optional[str] = None,
     page: int = Query(1, ge=1),
@@ -38,7 +39,7 @@ def ranking(
     items = [
         item
         for item in (
-            to_list_item(i, perfil, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
+            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker))
             for i in instrumentos
         )
         if item is not None
