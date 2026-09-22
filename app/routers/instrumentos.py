@@ -16,6 +16,7 @@ from ..models_financiera import Cotizacion, Instrumento, Scoring
 from ..schemas import (
     CurvaRendimiento,
     InstrumentoConsistente,
+    InstrumentoEnAlza,
     InstrumentoOpcion,
     InstrumentoOut,
     PaginatedInstrumentos,
@@ -299,20 +300,12 @@ def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
     return resultado
 
 
-@router.get("/consistentes", response_model=list[InstrumentoConsistente])
-def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")):
-    """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene siendo alto Y estable en las
-    últimas {CONSISTENCIA_DIAS} ruedas — a diferencia de "Oportunidades destacadas"/"La
-    oportunidad de hoy", que solo miran el Score de hoy, acá importa que se sostenga día tras
-    día. Se ordena por promedio menos desvío estándar: castiga la volatilidad tanto como
-    premia el nivel, así un 89/90/88/91/90 (constante) le gana a un 60/95/60/95/95 (parejo en
-    promedio pero errático) aunque compartan promedio similar. Requiere al menos
-    {CONSISTENCIA_MINIMO_DIAS} ruedas con Scoring calculado — con menos que eso no hay
-    suficiente historial para hablar de "consistencia" todavía.
-
-    Una sola consulta trae las últimas {CONSISTENCIA_DIAS} filas de Scoring por ticker (window
-    function), en vez de una consulta por instrumento — ver serializers.py:ultimos_scoring
-    para el mismo patrón de batching aplicado a "el último valor" en vez de "los últimos N"."""
+def _historial_scoring_reciente(db: Session, dias: int) -> dict[str, list]:
+    """Últimas `dias` filas de Scoring por cada instrumento activo, en una sola consulta
+    (window function) en vez de una consulta por instrumento — ver
+    serializers.py:ultimos_scoring para el mismo patrón de batching aplicado a "el último
+    valor" en vez de "los últimos N". Reutilizado por /consistentes y /en-alza: ambos parten
+    de la misma serie reciente por ticker, solo difieren en cómo la agregan."""
     rn = func.row_number().over(
         partition_by=Scoring.instrumento_ticker, order_by=Scoring.fecha_calculo.desc()
     ).label("rn")
@@ -332,7 +325,7 @@ def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: 
     )
     filas = (
         db.query(subq)
-        .filter(subq.c.rn <= CONSISTENCIA_DIAS)
+        .filter(subq.c.rn <= dias)
         .order_by(subq.c.instrumento_ticker, subq.c.fecha_calculo)
         .all()
     )
@@ -340,7 +333,33 @@ def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: 
     por_ticker: dict[str, list] = defaultdict(list)
     for fila in filas:
         por_ticker[fila.instrumento_ticker].append(fila)
+    return por_ticker
 
+
+def _pendiente(scores: list[int]) -> float:
+    """Pendiente de la regresión lineal simple (mínimos cuadrados, sin numpy) de `scores`
+    contra el número de rueda (0, 1, 2, ...) — puntos de Score que gana (o pierde) en
+    promedio por rueda."""
+    n = len(scores)
+    xs = range(n)
+    x_prom = statistics.mean(xs)
+    y_prom = statistics.mean(scores)
+    numerador = sum((x - x_prom) * (y - y_prom) for x, y in zip(xs, scores))
+    denominador = sum((x - x_prom) ** 2 for x in xs)
+    return numerador / denominador if denominador else 0.0
+
+
+@router.get("/consistentes", response_model=list[InstrumentoConsistente])
+def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")):
+    """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene siendo alto Y estable en las
+    últimas {CONSISTENCIA_DIAS} ruedas — a diferencia de "Oportunidades destacadas"/"La
+    oportunidad de hoy", que solo miran el Score de hoy, acá importa que se sostenga día tras
+    día. Se ordena por promedio menos desvío estándar: castiga la volatilidad tanto como
+    premia el nivel, así un 89/90/88/91/90 (constante) le gana a un 60/95/60/95/95 (parejo en
+    promedio pero errático) aunque compartan promedio similar. Requiere al menos
+    {CONSISTENCIA_MINIMO_DIAS} ruedas con Scoring calculado — con menos que eso no hay
+    suficiente historial para hablar de "consistencia" todavía."""
+    por_ticker = _historial_scoring_reciente(db, CONSISTENCIA_DIAS)
     instrumentos = {
         i.ticker: i
         for i in db.query(Instrumento).filter(Instrumento.ticker.in_(por_ticker.keys())).all()
@@ -369,6 +388,47 @@ def instrumentos_consistentes(db: Session = Depends(get_db_financiera), perfil: 
         )
 
     candidatos.sort(key=lambda c: c.scorePromedio - c.desvio, reverse=True)
+    return candidatos[:CONSISTENCIA_TOP_N]
+
+
+@router.get("/en-alza", response_model=list[InstrumentoEnAlza])
+def instrumentos_en_alza(db: Session = Depends(get_db_financiera), perfil: PerfilInversor = Query("moderado")):
+    """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene subiendo rueda a rueda en las
+    últimas {CONSISTENCIA_DIAS} — ni el más alto de hoy ("Oportunidades destacadas") ni el más
+    estable ("Scores más consistentes"), sino el que está mejorando. Se mide con la pendiente
+    de la regresión lineal del Score contra el número de rueda (ver _pendiente): solo entran
+    los que tienen pendiente positiva, un Score plano o en baja no es "en alza"."""
+    por_ticker = _historial_scoring_reciente(db, CONSISTENCIA_DIAS)
+    instrumentos = {
+        i.ticker: i
+        for i in db.query(Instrumento).filter(Instrumento.ticker.in_(por_ticker.keys())).all()
+    }
+
+    candidatos: list[InstrumentoEnAlza] = []
+    for ticker, filas_ticker in por_ticker.items():
+        if len(filas_ticker) < CONSISTENCIA_MINIMO_DIAS:
+            continue
+        instrumento = instrumentos.get(ticker)
+        if instrumento is None:
+            continue
+        scores = [
+            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil) for f in filas_ticker
+        ]
+        pendiente = _pendiente(scores)
+        if pendiente <= 0:
+            continue
+        candidatos.append(
+            InstrumentoEnAlza(
+                ticker=ticker,
+                nombre=instrumento.nombre,
+                tipo=instrumento.tipo,
+                subtipo=instrumento.subtipo,
+                pendiente=round(pendiente, 2),
+                scores=scores,
+            )
+        )
+
+    candidatos.sort(key=lambda c: c.pendiente, reverse=True)
     return candidatos[:CONSISTENCIA_TOP_N]
 
 

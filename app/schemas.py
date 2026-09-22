@@ -94,6 +94,19 @@ class InstrumentoConsistente(BaseModel):
     scores: list[int]  # últimas ruedas con Scoring calculado, orden cronológico (viejo → nuevo)
 
 
+class InstrumentoEnAlza(BaseModel):
+    """Para el bloque "Scores en alza" del Dashboard (ver GET /instrumentos/en-alza):
+    instrumentos cuyo Score viene subiendo rueda a rueda, no el más alto de hoy ni el más
+    estable — el que está mejorando."""
+
+    ticker: str
+    nombre: str
+    tipo: TipoInstrumento
+    subtipo: Optional[str] = None
+    pendiente: float  # puntos de Score que gana en promedio por rueda (regresión lineal)
+    scores: list[int]  # últimas ruedas con Scoring calculado, orden cronológico (viejo → nuevo)
+
+
 class InstrumentoListItem(BaseModel):
     """Versión liviana usada en listados/rankings (sin flujos)."""
 
