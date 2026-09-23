@@ -20,7 +20,7 @@ identificable como placeholder de prueba y nunca se confunda con el Modelo real 
 """
 
 import random
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import requests
 from sqlalchemy.orm import Session
@@ -163,6 +163,33 @@ def _marcar_ausentes_como_inactivos(db: Session) -> int:
     return marcados
 
 
+# "mostrar 1 mes tras el vencimiento, después ocultarlo completamente" (análisis de
+# factibilidad, punto [C]): el mes de gracia ya funciona solo con `activo=False` (un
+# instrumento inactivo sigue siendo consultable por ticker directo, ver GET /instrumentos/
+# {ticker}, que no filtra por activo — pero desaparece de listados/rankings), así que no hace
+# falta ningún estado nuevo, solo esta segunda condición de apagado.
+DIAS_GRACIA_VENCIMIENTO = 30
+
+
+def _marcar_vencidos_como_inactivos(db: Session, hoy: date) -> int:
+    """Marca `activo=False` para instrumentos vencidos hace más de DIAS_GRACIA_VENCIMIENTO días,
+    a diferencia de `_marcar_ausentes_como_inactivos` (que depende de que la fuente deje de
+    reportar el ticker, sin relación con el vencimiento real): acá el apagado es explícito por
+    calendario, no depende de que la fuente eventualmente deje de mandarlo.
+
+    Corre DESPUÉS del loop principal de `importar()` a propósito: ese loop reactiva
+    `activo=True` para cualquier ticker que la fuente siga reportando ese día (línea de arriba,
+    "reaparecer en la fuente reactiva un instrumento inactivo"), incluso si ya venció hace
+    tiempo — este paso es el que prevalece al final sobre esa reactivación."""
+    limite = hoy - timedelta(days=DIAS_GRACIA_VENCIMIENTO)
+    vencidos = (
+        db.query(Instrumento).filter(Instrumento.activo.is_(True), Instrumento.vencimiento < limite).all()
+    )
+    for instrumento in vencidos:
+        instrumento.activo = False
+    return len(vencidos)
+
+
 def importar(db: Session) -> dict:
     response = requests.get(BONOS_URL, timeout=10)
     response.raise_for_status()
@@ -301,6 +328,7 @@ def importar(db: Session) -> dict:
     fuente.ultima_actualizacion = datetime.utcnow()
 
     marcados_inactivos = _marcar_ausentes_como_inactivos(db)
+    marcados_vencidos = _marcar_vencidos_como_inactivos(db, hoy)
 
     db.commit()
 
@@ -312,5 +340,6 @@ def importar(db: Session) -> dict:
         "conParLegislacion": con_par_legislacion,
         "conScorePlaceholder": con_score_placeholder,
         "marcadosInactivos": marcados_inactivos,
+        "marcadosVencidos": marcados_vencidos,
         "tiposNoMapeadosExplicitamente": sorted(tipos_no_mapeados),
     }
