@@ -148,6 +148,7 @@ class PesosPerfil(BaseModel):
 
 class ScoreRentafyPesosOut(BaseModel):
     modeloId: str
+    publicadoEn: date | None
     pesos: dict[PerfilInversor, PesosPerfil]
 
 

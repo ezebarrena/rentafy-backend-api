@@ -16,6 +16,7 @@ from ..deps import get_db_financiera
 from ..financial_utils import REM_INFLACION_12M_URL, obtener_indicador_mercado
 from ..ingest import importar as importar_compararfondos
 from ..schemas import IndicadorMercado
+from ..tir_externo import completar_tir_faltante
 
 router = APIRouter(prefix="/mercado", tags=["mercado"])
 
@@ -86,6 +87,15 @@ def importar_bonos_compararfondos(db: Session = Depends(get_db_financiera)):
         return importar_compararfondos(db)
     except requests.RequestException as exc:
         raise HTTPException(502, f"Fuente externa (compararfondos.com.ar) no disponible: {exc}") from exc
+
+
+@router.post("/completar-tir")
+def completar_tir(db: Session = Depends(get_db_financiera)):
+    """Dispara manualmente el relleno de TIR externa (ver tir_externo.py) sin esperar al
+    horario programado (18:07 ART). Pensado para correr DESPUÉS de
+    POST /mercado/importar/compararfondos — si se llama antes, simplemente no encuentra
+    cotizaciones de hoy con TIR faltante todavía y no completa nada."""
+    return completar_tir_faltante(db)
 
 
 @router.get("/indicadores", response_model=list[IndicadorMercado])

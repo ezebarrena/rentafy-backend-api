@@ -56,11 +56,13 @@ def ranking(
 
 @router.get("/score-rentafy/pesos", response_model=ScoreRentafyPesosOut)
 def pesos_por_perfil(db: Session = Depends(get_db_financiera)):
-    """RF-34: pesos vigentes por perfil, usados por la página "¿Qué es el Score Rentafy?".
+    """RF-34: pesos vigentes por perfil, usados por la página "¿Qué es el Score Rentafy?" y por
+    el pie de página global (ver DataSourceNote.tsx, "Modelo vX · actualizado el...").
 
     Antes de esta versión devolvía siempre el diccionario estático PESOS_PERFIL sin importar
     el modeloId reportado — un bug real: el modeloId ya reflejaba el Modelo activo, pero los
     pesos no. Ahora usa pesos_vigentes(), la misma fuente que compute_score()."""
     modelo_activo = db.query(Modelo).filter(Modelo.activo == True).first()  # noqa: E712
     modelo_id = modelo_activo.id if modelo_activo else "v1.4.0"
-    return ScoreRentafyPesosOut(modeloId=modelo_id, pesos=pesos_vigentes(db))
+    publicado_en = modelo_activo.publicado_en if modelo_activo else None
+    return ScoreRentafyPesosOut(modeloId=modelo_id, publicadoEn=publicado_en, pesos=pesos_vigentes(db))

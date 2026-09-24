@@ -21,6 +21,7 @@ from apscheduler.triggers.cron import CronTrigger
 from .database import SessionFinanciera
 from .financial_utils import actualizar_todo as actualizar_financial_utils
 from .ingest import importar
+from .tir_externo import completar_tir_faltante
 
 logger = logging.getLogger("rentafy.scheduler")
 
@@ -59,6 +60,22 @@ def _actualizar_financial_utils() -> None:
         db.close()
 
 
+def _completar_tir_faltante() -> None:
+    """Ver tir_externo.py — corre DESPUÉS de _actualizar_catalogo (ya tiene que estar la
+    cotización de hoy) y ANTES de que el Servicio de IA arranque a las 18:10, para que el
+    Motor de Scoring de hoy ya encuentre la TIR rellena. Un solo intento (no MAX_REINTENTOS):
+    si bonistas.com no responde hoy, esos instrumentos simplemente quedan sin TIR un día más,
+    no es motivo para reintentar y atrasar la cadena de jobs de las 18hs."""
+    db = SessionFinanciera()
+    try:
+        resultado = completar_tir_faltante(db)
+        logger.info("Relleno de TIR externa OK: %s", resultado)
+    except Exception as exc:  # noqa: BLE001 — se loguea, no debe tumbar el proceso ni bloquear lo que sigue
+        logger.warning("Relleno de TIR externa falló: %s", exc)
+    finally:
+        db.close()
+
+
 def iniciar_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=ZONA_HORARIA_MERCADO)
     scheduler.add_job(
@@ -77,6 +94,17 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=5, day_of_week="mon-fri"),
         id="financial_utils_diario",
         name="Actualización diaria de financial_utils (REM BCRA, Riesgo País, Dólar CCL/MEP)",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        _completar_tir_faltante,
+        # minute=7: después de _actualizar_catalogo (18:00) y _actualizar_financial_utils
+        # (18:05), antes de que rentafy-servicioIA arranque su cadena a las 18:10 (Entrenamiento
+        # → Motor de Scoring, ver scheduler.py de ese repo).
+        trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=7, day_of_week="mon-fri"),
+        id="completar_tir_faltante_diario",
+        name=f"Relleno diario de TIR externa ({HORA_ACTUALIZACION}:07 ART)",
         replace_existing=True,
         misfire_grace_time=3600,
     )
