@@ -4,6 +4,7 @@ detalle de instrumentos. Espeja rentafy-frontend/src/data/filters.ts y sort.ts."
 import math
 import statistics
 from collections import defaultdict
+from datetime import date, timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -93,10 +94,19 @@ def _ajustar_curva(puntos: list[tuple[float, float]]) -> Optional[tuple[float, f
 
 router = APIRouter(prefix="/instrumentos", tags=["instrumentos"])
 
-SortKey = Literal["ticker", "score", "tir", "vencimiento", "variacion", "riesgo", "liquidez", "volumen"]
+SortKey = Literal[
+    "ticker", "tipo", "moneda", "precio", "score", "tir", "vencimiento", "variacion", "riesgo", "liquidez", "volumen"
+]
 
 _RIESGO_ORDEN = {"Bajo": 0, "Medio": 1, "Alto": 2}
 _LIQUIDEZ_ORDEN = {"Baja": 0, "Media": 1, "Alta": 2}
+
+# Mismos cortes que PlazoInversion (ver scoring.py: "corto ≤1 año, mediano 1-3 años, largo >3
+# años"), pero para el PROPIO vencimiento del instrumento (filtro de "Más filtros"), no para el
+# horizonte de inversión del usuario — son dos conceptos distintos que hoy comparten los mismos
+# cortes de año, por eso el parámetro se llama distinto (`plazo_vencimiento`, no `plazo`).
+_DIAS_CORTO_MAXIMO = 365
+_DIAS_MEDIANO_MAXIMO = 365 * 3
 
 
 @router.get("", response_model=PaginatedInstrumentos)
@@ -108,9 +118,16 @@ def listar_instrumentos(
     subtipo: Optional[str] = None,
     moneda: Optional[str] = None,
     riesgo: Optional[str] = None,
+    liquidez: Optional[str] = None,
+    plazo_vencimiento: Optional[Literal["corto", "mediano", "largo"]] = None,
     emisor: Optional[str] = None,
     tir_min: Optional[float] = None,
     tir_max: Optional[float] = None,
+    # Filtro por calificación (ver scoreLabel/SCORE_RANGO_POR_CALIFICACION en el frontend,
+    # data/scoring.ts): el frontend manda el rango exacto del tramo elegido (ej. Muy bueno =
+    # 75-89.99), no un piso "de acá para arriba" — mismos tramos que ScoreBadge en toda la app.
+    score_min: Optional[float] = None,
+    score_max: Optional[float] = None,
     q: Optional[str] = Query(None, description="Búsqueda por ticker o nombre (RF-16)"),
     sort: SortKey = "ticker",
     direction: Literal["asc", "desc"] = "asc",
@@ -135,6 +152,18 @@ def listar_instrumentos(
         query = query.filter(Instrumento.moneda == moneda)
     if riesgo and riesgo != "TODOS":
         query = query.filter(Instrumento.riesgo == riesgo)
+    if liquidez and liquidez != "TODOS":
+        query = query.filter(Instrumento.liquidez == liquidez)
+    if plazo_vencimiento:
+        hoy = date.today()
+        corte_corto = hoy + timedelta(days=_DIAS_CORTO_MAXIMO)
+        corte_mediano = hoy + timedelta(days=_DIAS_MEDIANO_MAXIMO)
+        if plazo_vencimiento == "corto":
+            query = query.filter(Instrumento.vencimiento <= corte_corto)
+        elif plazo_vencimiento == "mediano":
+            query = query.filter(Instrumento.vencimiento > corte_corto, Instrumento.vencimiento <= corte_mediano)
+        else:
+            query = query.filter(Instrumento.vencimiento > corte_mediano)
     if emisor and emisor != "TODOS":
         query = query.filter(Instrumento.emisor == emisor)
     if q:
@@ -164,8 +193,18 @@ def listar_instrumentos(
         items = [i for i in items if i.tir is not None and i.tir >= tir_min]
     if tir_max is not None:
         items = [i for i in items if i.tir is not None and i.tir <= tir_max]
+    if score_min is not None:
+        items = [i for i in items if i.score is not None and i.score >= score_min]
+    if score_max is not None:
+        items = [i for i in items if i.score is not None and i.score <= score_max]
 
     def sort_key(item):
+        if sort == "tipo":
+            return item.subtipo or item.tipo
+        if sort == "moneda":
+            return item.moneda
+        if sort == "precio":
+            return item.precio
         if sort == "score":
             return item.score if item.score is not None else float("-inf")
         if sort == "tir":
