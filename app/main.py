@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS
 from .database import BaseFinanciera, BaseNoFinanciera, SessionFinanciera, engine_financiera, engine_no_financiera
-from .routers import auth, calendario, instrumentos, mercado, rankings, watchlist
+from .routers import auth, calendario, debug, instrumentos, mercado, rankings, watchlist
 from .scheduler import iniciar_scheduler
 from .seed import seed_if_empty
 
@@ -51,6 +51,7 @@ app.include_router(rankings.router)
 app.include_router(watchlist.router)
 app.include_router(calendario.router)
 app.include_router(mercado.router)
+app.include_router(debug.router)
 
 
 @app.get("/", tags=["health"])
