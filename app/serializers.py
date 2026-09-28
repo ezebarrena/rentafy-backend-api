@@ -6,12 +6,51 @@ instrumento recién importado desde una fuente de mercado (ver ingest.py) tiene 
 pero todavía no tiene Scoring calculado, dado que ese cálculo es responsabilidad de un
 componente separado (el Servicio de IA, fuera del alcance de este backend)."""
 
+from datetime import date, timedelta
+
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .models_financiera import Cotizacion, Instrumento, Scoring
-from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, NivelRiesgo, PerfilInversor, PesosPerfil, PlazoInversion
+from .schemas import (
+    FactoresScore,
+    FlujoFondo,
+    InstrumentoListItem,
+    InstrumentoOut,
+    NivelRiesgo,
+    PerfilInversor,
+    PesosPerfil,
+    PlazoInversion,
+    VariacionPeriodo,
+)
 from .scoring import compute_score
+
+# (días, para no repetir el número mágico en la query y en el schema de respuesta). Ver análisis
+# de factibilidad: 7/30 tienen cobertura real hoy en casi todo el catálogo; 180/365 se van
+# llenando solos con el tiempo (la mayoría del catálogo todavía no acumula esa antigüedad de
+# ingesta diaria real) — se devuelven igual, con `variacion=None`, en vez de omitirse.
+DIAS_VARIACION_PERIODO = (7, 30, 180, 365)
+
+
+def _variaciones_periodo(
+    cotizaciones: list[Cotizacion], precio_actual: float, hoy: date
+) -> list[VariacionPeriodo]:
+    """Para cada ventana, busca —dentro del historial YA CARGADO de `instrumento.cotizaciones`
+    (mismo relationship que usa `_ultima_cotizacion`, sin queries nuevas)— la más cercana a
+    (hoy - dias) sin pasarse: no necesariamente exacta, el mercado no opera todos los días
+    calendario. Solo se usa en el detalle de un instrumento puntual (no en listados): traer el
+    historial completo de cientos de tickers para paginar sería otra historia."""
+    resultado = []
+    for dias in DIAS_VARIACION_PERIODO:
+        objetivo = hoy - timedelta(days=dias)
+        candidatas = [c for c in cotizaciones if c.fecha <= objetivo]
+        fila = max(candidatas, key=lambda c: c.fecha) if candidatas else None
+        if fila is None or fila.precio == 0:
+            resultado.append(VariacionPeriodo(dias=dias))
+        else:
+            variacion = round((precio_actual - fila.precio) / fila.precio * 100, 2)
+            resultado.append(VariacionPeriodo(dias=dias, variacion=variacion, fechaReferencia=fila.fecha))
+    return resultado
 
 # Cortes del badge "Bajo/Medio/Alto" mostrado en toda la app (InstrumentTable, filtros,
 # Dashboard) sobre el factor Riesgo real (0-100, donde MÁS alto = MÁS seguro — ver
@@ -187,4 +226,5 @@ def to_detail(
         flujos=[FlujoFondo(fecha=f.fecha, tipo=f.tipo, importe=f.importe) for f in instrumento.flujos],
         resumen=instrumento.resumen,
         score=_score(sc, perfil, plazo, pesos_base),
+        variacionesPeriodo=_variaciones_periodo(instrumento.cotizaciones, cot.precio, date.today()),
     )

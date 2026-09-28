@@ -37,6 +37,18 @@ class FlujoFondo(BaseModel):
     importe: float
 
 
+class VariacionPeriodo(BaseModel):
+    """Variación de precio contra la cotización más cercana a `dias` atrás (ver
+    serializers.py:_variaciones_periodo). `variacion`/`fechaReferencia` son None cuando el
+    instrumento todavía no tiene esa profundidad de historial — la mayoría del catálogo hoy
+    no llega a 180/365 días, ver análisis de factibilidad (no es un error, se va llenando con
+    el tiempo a medida que se acumula ingesta diaria real)."""
+
+    dias: int
+    variacion: Optional[float] = None
+    fechaReferencia: Optional[date] = None
+
+
 class InstrumentoOut(BaseModel):
     ticker: str
     nombre: str
@@ -70,6 +82,10 @@ class InstrumentoOut(BaseModel):
     flujos: list[FlujoFondo]
     resumen: str = ""
     score: Optional[float] = Field(default=None, description="Score ya ponderado según el perfil solicitado")
+    variacionesPeriodo: list[VariacionPeriodo] = Field(
+        default_factory=list,
+        description="Variación de precio a 7/30/180/365 días — solo en el detalle, no en los listados.",
+    )
 
 
 class InstrumentoOpcion(BaseModel):
