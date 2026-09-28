@@ -4,9 +4,11 @@ para el desglose de CADA factor) en el Score final: pesos por perfil, ajuste por
 inversión, y la redistribución cuando falta algún factor (RNF-29).
 """
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ..config import IA_SERVICE_URL
 from ..deps import get_db_financiera
 from ..models_financiera import Instrumento, Scoring
 from ..scoring import AJUSTE_PLAZO, PESOS_PERFIL, _pesos_ajustados, pesos_vigentes
@@ -16,17 +18,7 @@ from ..serializers import ultimas_cotizaciones, ultimos_scoring
 router = APIRouter(prefix="/instrumentos", tags=["debug"])
 
 
-@router.get("/{ticker}/pesos-explicado")
-def pesos_explicado(
-    ticker: str,
-    db: Session = Depends(get_db_financiera),
-    perfil: PerfilInversor = Query("moderado"),
-    plazo: PlazoInversion = Query("mediano"),
-):
-    """TESTEO INTERNO: cómo se combinan los 4 factores YA CALCULADOS (ver Scoring) en el Score
-    final para `perfil`/`plazo` — pesos vigentes, ajuste por plazo, redistribución si falta
-    algún factor. Para el desglose de CÓMO se llegó a cada factor en sí, ver
-    rentafy-servicioIA GET /debug/{ticker}."""
+def _pesos_explicado(db: Session, ticker: str, perfil: PerfilInversor, plazo: PlazoInversion) -> dict:
     ticker = ticker.upper()
     instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker).first()
     if instrumento is None:
@@ -91,3 +83,43 @@ def pesos_explicado(
         "scoreFinal": {"formula": formula_final, "valor": score},
         "precioActual": cot.precio if cot else None,
     }
+
+
+@router.get("/{ticker}/pesos-explicado")
+def pesos_explicado(
+    ticker: str,
+    db: Session = Depends(get_db_financiera),
+    perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
+):
+    """TESTEO INTERNO: cómo se combinan los 4 factores YA CALCULADOS (ver Scoring) en el Score
+    final para `perfil`/`plazo` — pesos vigentes, ajuste por plazo, redistribución si falta
+    algún factor. Para el desglose de CÓMO se llegó a cada factor en sí, ver
+    rentafy-servicioIA GET /debug/{ticker} (o /debug-completo acá mismo, que ya lo incluye)."""
+    return _pesos_explicado(db, ticker, perfil, plazo)
+
+
+@router.get("/{ticker}/debug-completo")
+def debug_completo(
+    ticker: str,
+    db: Session = Depends(get_db_financiera),
+    perfil: PerfilInversor = Query("moderado"),
+    plazo: PlazoInversion = Query("mediano"),
+):
+    """TESTEO INTERNO: junta pesos-explicado (acá mismo) con el desglose de cada factor de
+    rentafy-servicioIA (GET /debug/{ticker}), en una sola respuesta.
+
+    El navegador de quien usa /app/debug-score NUNCA le pega directo a rentafy-servicioIA: ese
+    servicio escucha en 127.0.0.1 en la EC2 a propósito (ver rentafy-servicioIA/deploy/
+    rentafy-servicioia.service) — no está expuesto a internet, ni lo va a estar. Este backend
+    SÍ puede llegar a él porque corre en la MISMA máquina (ver IA_SERVICE_URL en config.py);
+    hace de único punto de entrada público para esta pantalla de testeo."""
+    ticker = ticker.upper()
+    pesos = _pesos_explicado(db, ticker, perfil, plazo)
+    try:
+        respuesta = requests.get(f"{IA_SERVICE_URL}/debug/{ticker}", timeout=10)
+        respuesta.raise_for_status()
+        factores = respuesta.json()
+    except requests.RequestException as exc:
+        raise HTTPException(502, f"rentafy-servicioIA no disponible en {IA_SERVICE_URL}: {exc}") from exc
+    return {"factores": factores, "pesos": pesos}

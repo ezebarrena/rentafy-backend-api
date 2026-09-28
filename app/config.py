@@ -15,3 +15,10 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+
+# rentafy-servicioIA corre en la MISMA máquina que este backend, tanto en desarrollo (tu compu)
+# como en producción (la EC2, ver rentafy-servicioIA/deploy/rentafy-servicioia.service: escucha
+# en 127.0.0.1, nunca expuesto a internet a propósito) — "localhost" acá siempre significa "este
+# mismo servidor", nunca la compu de quien abre el navegador. Solo lo usa /debug (routers/debug.py,
+# testeo interno): el resto del backend no depende de este servicio para nada.
+IA_SERVICE_URL = os.getenv("IA_SERVICE_URL", "http://localhost:8090")
