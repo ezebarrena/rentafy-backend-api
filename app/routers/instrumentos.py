@@ -35,6 +35,10 @@ DIAS_SCORING_HISTORICO = 20
 CONSISTENCIA_DIAS = 10
 CONSISTENCIA_MINIMO_DIAS = 5
 CONSISTENCIA_TOP_N = 10
+# R² mínimo para que una pendiente positiva cuente como tendencia real en "Scores en alza" (ver
+# instrumentos_en_alza) — 0.7 excluye el caso real detectado (RC2CC, R²≈0.62, puro zigzag) sin
+# ser tan exigente como para pedir una recta casi perfecta.
+UMBRAL_R2_EN_ALZA = 0.7
 CURVA_MINIMO_PUNTOS = 3
 # Candidatos a excluir: instrumentos a menos de ~55 días del vencimiento, donde la TIR
 # anualizada amplifica cualquier ruido de precio. No se excluyen todos los que caen acá — ver
@@ -430,17 +434,30 @@ def _salto_maximo(scores: list[int]) -> float:
     return max(abs(b - a) for a, b in zip(scores, scores[1:]))
 
 
-def _pendiente(scores: list[int]) -> float:
+def _pendiente_y_ajuste(scores: list[int]) -> tuple[float, float]:
     """Pendiente de la regresión lineal simple (mínimos cuadrados, sin numpy) de `scores`
     contra el número de rueda (0, 1, 2, ...) — puntos de Score que gana (o pierde) en
-    promedio por rueda."""
+    promedio por rueda — junto con el R² de ese ajuste (cuánta de la variación de los scores
+    explica esa recta, 0 a 1).
+
+    El R² importa porque una pendiente positiva por sí sola no distingue una tendencia real de
+    puro ruido: una serie que zigzaguea (ej. 35, 35, 33, 50, 45, 39, 49, 49, 49, 50 — cae fuerte
+    y después oscila en un piso más bajo, sin volver a subir de verdad) puede dar pendiente
+    positiva solo porque el primer punto de la ventana cayó en un valle y el último en un pico,
+    con R² bajo revelando que la recta ajusta mal. Ver `instrumentos_en_alza`, que exige un R²
+    mínimo además de pendiente positiva."""
     n = len(scores)
     xs = range(n)
     x_prom = statistics.mean(xs)
     y_prom = statistics.mean(scores)
     numerador = sum((x - x_prom) * (y - y_prom) for x, y in zip(xs, scores))
     denominador = sum((x - x_prom) ** 2 for x in xs)
-    return numerador / denominador if denominador else 0.0
+    pendiente = numerador / denominador if denominador else 0.0
+    intercepto = y_prom - pendiente * x_prom
+    ss_res = sum((y - (intercepto + pendiente * x)) ** 2 for x, y in zip(xs, scores))
+    ss_tot = sum((y - y_prom) ** 2 for y in scores)
+    r2 = 1 - ss_res / ss_tot if ss_tot else 0.0
+    return pendiente, r2
 
 
 @router.get("/consistentes", response_model=list[InstrumentoConsistente])
@@ -503,8 +520,13 @@ def instrumentos_en_alza(
     """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene subiendo rueda a rueda en las
     últimas {CONSISTENCIA_DIAS} — ni el más alto de hoy ("Oportunidades destacadas") ni el más
     estable ("Scores más consistentes"), sino el que está mejorando. Se mide con la pendiente
-    de la regresión lineal del Score contra el número de rueda (ver _pendiente): solo entran
-    los que tienen pendiente positiva, un Score plano o en baja no es "en alza"."""
+    de la regresión lineal del Score contra el número de rueda (ver _pendiente_y_ajuste): solo
+    entran los que tienen pendiente positiva Y un R² razonable (ver UMBRAL_R2_EN_ALZA) — sin
+    esto último, una serie que cae fuerte y después zigzaguea en un piso más bajo (ej. un
+    instrumento al que se le cae el factor rendimiento a mitad de ventana) puede dar pendiente
+    positiva de pura casualidad de qué día arrancó y terminó la ventana, sin ser una tendencia
+    real (caso real detectado: RC2CC, serie 35/35/33/50/45/39/49/49/49/50 — pendiente positiva,
+    R² bajo, no es un activo genuinamente en alza)."""
     por_ticker = _historial_scoring_reciente(db, CONSISTENCIA_DIAS)
     instrumentos = {
         i.ticker: i
@@ -523,8 +545,8 @@ def instrumentos_en_alza(
             compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base)
             for f in filas_ticker
         ]
-        pendiente = _pendiente(scores)
-        if pendiente <= 0:
+        pendiente, r2 = _pendiente_y_ajuste(scores)
+        if pendiente <= 0 or r2 < UMBRAL_R2_EN_ALZA:
             continue
         candidatos.append(
             InstrumentoEnAlza(
