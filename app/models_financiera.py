@@ -200,3 +200,29 @@ class Caucion(BaseFinanciera):
     # esos 4 puntos, ver _interpolar_lineal en cauciones.py) — para que cualquier consumidor
     # futuro distinga "dato de mercado" de "estimación nuestra" sin adivinar por plazo_dias.
     estimado: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class CalificacionCrediticia(BaseFinanciera):
+    """Calificación de riesgo crediticio por emisor (FIX SCR/afiliada de Fitch, o Moody's Local
+    Argentina — ambas calificadoras registradas ante la CNV, de acceso público) — ver
+    app/calificaciones.py. Usada por rentafy-servicioIA/app/factores/riesgo.py para que el
+    factor Riesgo de una ON no dependa solo de su duration relativa dentro del grupo de pares
+    (ver docstring de calificaciones.py: hoy TODAS las ON caen en un único grupo, así que esa
+    duration por sí sola no distingue a YPF de un emisor chico sin trayectoria).
+
+    Una fila por emisor (no por ticker ni histórica): se pisa en el lugar cuando se actualiza
+    a mano la curaduría, igual criterio que Instrumento.riesgo/liquidez de arriba — no hace
+    falta el historial de calificación para el cálculo del Score de HOY."""
+
+    __tablename__ = "calificaciones_credito"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    emisor: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    agencia: Mapped[str] = mapped_column(String(40))  # "FIX SCR" | "Moody's Local Argentina"
+    rating_letra: Mapped[str] = mapped_column(String(20))  # ej. "AAA(arg)", "AA.ar"
+    # Escala nacional mapeada a 0-100 (100 = AAA, máxima calidad) — ver RATING_A_NUMERO en
+    # calificaciones.py. Precalculado al curar el dato para no reparsear el string en cada
+    # corrida del Motor de Scoring.
+    rating_numerico: Mapped[float] = mapped_column(Float)
+    fecha_actualizacion: Mapped[date] = mapped_column(Date)
+    fuente_url: Mapped[str] = mapped_column(String(300), default="")

@@ -20,6 +20,7 @@ identificable como placeholder de prueba y nunca se confunda con el Modelo real 
 """
 
 import random
+import re
 from datetime import date, datetime, timedelta
 
 import requests
@@ -69,15 +70,37 @@ def _mapear_tipo(bond: dict) -> tuple[str, str | None]:
     return tipo, subtipo
 
 
+_EMISOR_ON_CORTE_RE = re.compile(
+    r"""
+    \bCl\.?\s*[IVXLC0-9]+\b   # marcador de clase/serie: "Cl.17", "Cl 2", "Cl. IV"
+    | \((?:Clase|Serie)\b     # "(Clase D)", "(Serie III..."
+    | \b(?:19|20)\d{2}\b      # año de vencimiento: 2027, 2034...
+    | \b\d+[.,]?\d*\s*%       # cupón: "6,75%", "9.5%"
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
 def _derivar_emisor(bond: dict) -> str:
-    """La fuente no expone un campo de emisor estructurado; se aproxima por tipo/país."""
+    """La fuente no expone un campo de emisor estructurado; se aproxima por tipo/país.
+
+    Para ON, el nombre suele ser "Emisor [Cl.N] [año] [cupón%]" (ej. "Banco Macro 2026 6.75%",
+    "John Deere Cl.17 2027 7,5%") — usar solo la primera palabra (heurística anterior) rompía
+    cualquier emisor de nombre compuesto, agrupando bancos distintos bajo el emisor genérico
+    "Banco". Ahora se corta el nombre en el primer marcador de clase/año/cupón que aparezca
+    (lo que venga primero), y se toma todo lo anterior como nombre del emisor. Sigue siendo una
+    aproximación (no hay fuente de nombre legal completo) — variantes de un mismo emisor entre
+    bonos (ej. "Pampa" vs "Pampa Energía", "Vista" vs "Vista Energy") pueden seguir sin
+    unificarse, pero ya no colisionan emisores DISTINTOS entre sí como antes."""
     tipo, moneda = bond["tipo"], bond["moneda"]
     if tipo in ("Soberano", "FIJA", "CER", "DUAL", "TAMAR", "DL", "LECAP", "BONCAP"):
         return "República Argentina" if moneda == "USD" else "Tesoro Nacional"
     if tipo == "Provincial":
         return "Gobierno provincial"
-    # ON: no hay campo emisor; se aproxima con el primer token del nombre (ej. "CGC 2026 Zero" -> "CGC").
-    return bond["nombre"].split()[0]
+    nombre = bond["nombre"]
+    corte = _EMISOR_ON_CORTE_RE.search(nombre)
+    emisor = nombre[: corte.start()] if corte else nombre
+    return emisor.strip(" .,-") or nombre
 
 
 def _derivar_riesgo(duration: float | None, plazo_residual: float | None) -> str:

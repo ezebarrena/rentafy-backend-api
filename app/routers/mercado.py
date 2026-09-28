@@ -12,6 +12,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..calificaciones import importar_calificaciones
 from ..cauciones import importar_cauciones
 from ..deps import get_db_financiera
 from ..financial_utils import REM_INFLACION_12M_URL, obtener_indicador_mercado
@@ -104,6 +105,15 @@ def importar_cauciones_endpoint(db: Session = Depends(get_db_financiera)):
     """Dispara manualmente la actualización de tasas de caución (ver cauciones.py) sin esperar
     al horario programado (18:09 ART). Sin dependencia de orden con los otros imports."""
     return importar_cauciones(db)
+
+
+@router.post("/importar/calificaciones")
+def importar_calificaciones_endpoint(db: Session = Depends(get_db_financiera)):
+    """Vuelca la tabla curada a mano de calificaciones crediticias por emisor (ver
+    calificaciones.py) a la base — sin cadencia automática en el scheduler: se corre manualmente
+    cada vez que se revisa/actualiza esa tabla, ya que las calificaciones cambian con muy poca
+    frecuencia (a diferencia de cauciones/cotizaciones, que sí son diarias)."""
+    return importar_calificaciones(db)
 
 
 @router.get("/indicadores", response_model=list[IndicadorMercado])
