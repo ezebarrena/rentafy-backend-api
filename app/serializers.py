@@ -10,8 +10,25 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .models_financiera import Cotizacion, Instrumento, Scoring
-from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, PerfilInversor, PesosPerfil, PlazoInversion
+from .schemas import FactoresScore, FlujoFondo, InstrumentoListItem, InstrumentoOut, NivelRiesgo, PerfilInversor, PesosPerfil, PlazoInversion
 from .scoring import compute_score
+
+# Cortes del badge "Bajo/Medio/Alto" mostrado en toda la app (InstrumentTable, filtros,
+# Dashboard) sobre el factor Riesgo real (0-100, donde MÁS alto = MÁS seguro — ver
+# rentafy-servicioIA/app/factores/riesgo.py). Reemplaza la heurística vieja de
+# ingest.py:_derivar_riesgo (que solo miraba duration, fija desde el ingreso y nunca se
+# actualizaba con el Scoring diario) — ahora el badge refleja el mismo número que ya se usa
+# para calcular el Score, calificación crediticia de ONs incluida.
+RIESGO_BUCKET_BAJO_MINIMO = 66.0
+RIESGO_BUCKET_MEDIO_MINIMO = 33.0
+
+
+def _riesgo_bucket(riesgo_score: float) -> NivelRiesgo:
+    if riesgo_score >= RIESGO_BUCKET_BAJO_MINIMO:
+        return "Bajo"
+    if riesgo_score >= RIESGO_BUCKET_MEDIO_MINIMO:
+        return "Medio"
+    return "Alto"
 
 
 def _ultima_cotizacion(instrumento: Instrumento):
@@ -100,7 +117,7 @@ def to_list_item(
         volumen=cot.volumen,
         tir=cot.tir,
         tirSufijo=cot.tir_sufijo,
-        riesgo=instrumento.riesgo,
+        riesgo=_riesgo_bucket(sc.riesgo) if sc is not None else instrumento.riesgo,
         liquidez=instrumento.liquidez,
         resumen=instrumento.resumen,
         score=_score(sc, perfil, plazo, pesos_base),
@@ -148,7 +165,7 @@ def to_detail(
         duration=cot.duration,
         plazoResidual=cot.plazo_residual,
         paridad=cot.paridad,
-        riesgo=instrumento.riesgo,
+        riesgo=_riesgo_bucket(sc.riesgo) if sc is not None else instrumento.riesgo,
         liquidez=instrumento.liquidez,
         precioStale=cot.precio_stale,
         factores=(

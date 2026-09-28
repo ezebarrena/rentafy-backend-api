@@ -25,7 +25,12 @@ class Instrumento(BaseFinanciera):
     legislacion: Mapped[str | None] = mapped_column(String(30), nullable=True)
     par_legislacion: Mapped[str | None] = mapped_column(String(20), nullable=True)
     vencimiento: Mapped[date] = mapped_column(Date)
-    riesgo: Mapped[str] = mapped_column(String(10))  # Bajo | Medio | Alto
+    # Bajo | Medio | Alto — heurística de duration fijada al ingerir (ver ingest.py:
+    # _derivar_riesgo). Ya NO es lo que se muestra como badge cuando hay Scoring calculado:
+    # serializers.py deriva el badge real del factor Riesgo del día (0-100, con calificación
+    # crediticia incluida para ON) y solo cae a este valor de acá si el instrumento todavía no
+    # tiene Scoring (recién ingresado, ver RNF-29).
+    riesgo: Mapped[str] = mapped_column(String(10))
     liquidez: Mapped[str] = mapped_column(String(10))  # Alta | Media | Baja
     resumen: Mapped[str] = mapped_column(String(500), default="")
     # False cuando el instrumento deja de aparecer varias corridas seguidas de la importación

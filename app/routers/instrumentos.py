@@ -143,7 +143,10 @@ def listar_instrumentos(
     # Todo lo que se puede resolver con una columna de Instrumento se filtra acá, en SQL, en
     # vez de traer el catálogo entero y filtrarlo con list comprehensions en Python — con
     # filtros activos (la mayoría de los usos reales) esto reduce bastante cuántas filas
-    # siquiera llegan a Python.
+    # siquiera llegan a Python. "riesgo" NO entra acá a propósito (ver más abajo, junto a
+    # tir_min/score_min): ya no es una columna estática de Instrumento, se deriva del Scoring
+    # de hoy (ver serializers.py:_riesgo_bucket) — recién se conoce después de resolver el
+    # batch de Scoring, no antes.
     query = db.query(Instrumento).filter(Instrumento.activo.is_(True))
     if tipo and tipo != "TODOS":
         query = query.filter(Instrumento.tipo == tipo)
@@ -151,8 +154,6 @@ def listar_instrumentos(
         query = query.filter(Instrumento.subtipo == subtipo)
     if moneda:
         query = query.filter(Instrumento.moneda == moneda)
-    if riesgo and riesgo != "TODOS":
-        query = query.filter(Instrumento.riesgo == riesgo)
     if liquidez and liquidez != "TODOS":
         query = query.filter(Instrumento.liquidez == liquidez)
     if plazo_vencimiento:
@@ -190,6 +191,8 @@ def listar_instrumentos(
         if item is not None
     ]
 
+    if riesgo and riesgo != "TODOS":
+        items = [i for i in items if i.riesgo == riesgo]
     if tir_min is not None:
         items = [i for i in items if i.tir is not None and i.tir >= tir_min]
     if tir_max is not None:
