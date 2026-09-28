@@ -294,9 +294,20 @@ def _construir_curvas(
         duration = cot.duration if cot.duration is not None else cot.plazo_residual
         if duration is None:
             continue
+        duration_redondeada = round(duration, 2)
+        # ln(duration) no está definido en 0 — un instrumento a 1-2 días del vencimiento tiene
+        # duration real pequeña pero positiva (ej. 0.003 años) que este redondeo a 2 decimales
+        # colapsa a 0.0 exacto (caso real detectado: X30S6, vence en 2 días). Sin este chequeo,
+        # ese punto rompía el ajuste de TODO el grupo (y por lo tanto /curvas entero, para
+        # cualquier tipo) con un ValueError de math.log — se excluye acá, antes de que llegue a
+        # _ajustar_curva, en vez de solo en el filtro de "candidato a excluir" de más abajo (ese
+        # filtro corre DESPUÉS del primer ajuste con todos los puntos, ya tarde para evitar el
+        # crash).
+        if duration_redondeada <= 0:
+            continue
         clave = (inst.tipo, inst.subtipo, inst.moneda)
         grupos[clave].append(
-            PuntoCurva(ticker=inst.ticker, nombre=inst.nombre, duration=round(duration, 2), tir=round(cot.tir, 2))
+            PuntoCurva(ticker=inst.ticker, nombre=inst.nombre, duration=duration_redondeada, tir=round(cot.tir, 2))
         )
 
     resultado: dict[tuple[str, Optional[str], str], CurvaRendimiento] = {}
