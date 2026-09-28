@@ -331,14 +331,54 @@ def _construir_curvas(
     return resultado
 
 
+def _curva_cauciones(db: Session) -> Optional[CurvaRendimiento]:
+    """Curva TNA vs plazo de cauciones — todos los tenores en la última fecha disponible.
+    Plazo en days se convierte a años para compatibility con CurvaRendimiento (que usa
+    duration). No hay ajuste OLS: solo 6 puntos, no es robusto."""
+    ultima_fecha = db.query(func.max(Caucion.fecha)).scalar()
+    if ultima_fecha is None:
+        return None
+    cauciones = db.query(Caucion).filter(Caucion.fecha == ultima_fecha).order_by(Caucion.plazo_dias).all()
+    if not cauciones:
+        return None
+    # Convertir a PuntoCurva (duration en años, ticker sintético).
+    puntos = [
+        PuntoCurva(
+            ticker=f"CAUC{c.plazo_dias}D",
+            nombre=f"Caución {c.plazo_dias}d{'e' if c.plazo_dias == 1 else 'ías'}",
+            duration=c.plazo_dias / 365.0,
+            tir=c.tna
+        )
+        for c in cauciones
+    ]
+    # Sin ajuste OLS para cauciones (6 puntos, muy pocos para un fit robusto) — devolver
+    # a=0, b=0, r2=0 para indicar "sin modelo" al frontend.
+    return CurvaRendimiento(
+        tipo='CAUCION',
+        subtipo=None,
+        moneda='ARS',
+        label='Cauciones',
+        puntos=puntos,
+        a=0.0,
+        b=0.0,
+        r2=0.0,
+        excluidos=[]
+    )
+
+
 @router.get("/curvas", response_model=list[CurvaRendimiento])
 def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
-    """Curva de rendimiento (TIR contra duration) de los 5 grupos de pares con datos
-    suficientes — para la pestaña "Rendimientos". El detalle de un instrumento puntual no usa
-    este endpoint (ver /{ticker}/curva): no necesita los otros 4 grupos."""
+    """Curva de rendimiento (TIR contra duration) de los grupos de pares con datos
+    suficientes — para la pestaña "Rendimientos". Incluye las cauciones (TNA vs plazo)
+    si hay datos disponibles. El detalle de un instrumento puntual no usa este endpoint
+    (ver /{ticker}/curva): no necesita los otros grupos."""
     instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
     cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
     resultado = list(_construir_curvas(instrumentos, cotizaciones).values())
+    # Agregar curva de cauciones al final si existe.
+    curva_cauciones = _curva_cauciones(db)
+    if curva_cauciones:
+        resultado.append(curva_cauciones)
     resultado.sort(key=lambda c: _curva_orden_key(c.label))
     return resultado
 
