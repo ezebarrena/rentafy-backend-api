@@ -13,11 +13,12 @@ from sqlalchemy.orm import Session
 
 from ..financial_utils import obtener_rem_inflacion
 from ..deps import get_db_financiera
-from ..models_financiera import Cotizacion, Instrumento, Scoring
+from ..models_financiera import Caucion, Cotizacion, Instrumento, Scoring
 from ..schemas import (
     CurvaRendimiento,
     InstrumentoConsistente,
     InstrumentoEnAlza,
+    InstrumentoListItem,
     InstrumentoOpcion,
     InstrumentoOut,
     PaginatedInstrumentos,
@@ -495,6 +496,47 @@ def instrumentos_en_alza(
 
     candidatos.sort(key=lambda c: c.pendiente, reverse=True)
     return candidatos[:CONSISTENCIA_TOP_N]
+
+
+_PLAZO_LABEL = lambda dias: f"{dias} día" if dias == 1 else f"{dias} días"  # noqa: E731
+
+
+@router.get("/cauciones", response_model=list[InstrumentoListItem])
+def listar_cauciones(db: Session = Depends(get_db_financiera)):
+    """Cauciones en pesos (ver cauciones.py) disfrazadas de InstrumentoListItem para poder
+    reusar InstrumentTable.tsx tal cual — NO son filas de Instrumento (no tienen ticker real ni
+    Scoring, `score` siempre viene None acá) y a propósito no las devuelve GET /instrumentos:
+    Instrumentos.tsx las pide acá aparte, con su propio botón "Caución", para que Rankings y
+    Dashboard (que sí usan GET /instrumentos) nunca las vean.
+
+    `vencimiento` se calcula como hoy + plazo, no es una fecha fija guardada: una caución se
+    renueva desde el día que se toma, no vence en una fecha absoluta como un bono."""
+    ultima_fecha = db.query(func.max(Caucion.fecha)).scalar()
+    if ultima_fecha is None:
+        return []
+    filas = db.query(Caucion).filter(Caucion.fecha == ultima_fecha).order_by(Caucion.plazo_dias).all()
+    hoy = date.today()
+    return [
+        InstrumentoListItem(
+            ticker=f"CAUC{fila.plazo_dias}D",
+            nombre=f"Caución a {_PLAZO_LABEL(fila.plazo_dias)}" + (" (estimado)" if fila.estimado else ""),
+            tipo="CAUCION",
+            subtipo=None,
+            moneda="ARS",
+            emisor="BYMA",
+            vencimiento=hoy + timedelta(days=fila.plazo_dias),
+            precio=100.0,
+            variacion=0.0,
+            volumen=0,
+            tir=fila.tna,
+            tirSufijo=None,
+            riesgo="Bajo",
+            liquidez="Alta",
+            resumen="Colocación garantizada por BYMA — sin fluctuación de precio de mercado como un bono.",
+            score=None,
+        )
+        for fila in filas
+    ]
 
 
 @router.get("/{ticker}/curva", response_model=Optional[CurvaRendimiento])

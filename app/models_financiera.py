@@ -180,3 +180,23 @@ class IndicadorMercadoCache(BaseFinanciera):
     tendencia: Mapped[str] = mapped_column(String(10))  # positiva | negativa | neutral
     detalle: Mapped[str | None] = mapped_column(String(50), nullable=True)
     fecha: Mapped[date] = mapped_column(Date)
+
+
+class Caucion(BaseFinanciera):
+    """Tasa de caución en pesos por plazo, un valor por día (ver app/cauciones.py). No es un
+    Instrumento: no tiene ticker ni vencimiento fijo — el plazo (1, 7, 14, 30 días, más 21 y 60
+    calculados) se renueva desde HOY cada vez que se toma o coloca una caución nueva, a
+    diferencia de un bono con una fecha de vencimiento propia. Por eso vive en su propia tabla
+    en vez de sumar filas forzadas a Instrumento/Cotizacion."""
+
+    __tablename__ = "cauciones"
+    __table_args__ = (Index("ix_cauciones_fecha_plazo", "fecha", "plazo_dias", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fecha: Mapped[date] = mapped_column(Date)
+    plazo_dias: Mapped[int] = mapped_column(Integer)
+    tna: Mapped[float] = mapped_column(Float)
+    # False para 1/7/14/30 (tasa real de Rava); True para 21/60 (interpolado/extrapolado sobre
+    # esos 4 puntos, ver _interpolar_lineal en cauciones.py) — para que cualquier consumidor
+    # futuro distinga "dato de mercado" de "estimación nuestra" sin adivinar por plazo_dias.
+    estimado: Mapped[bool] = mapped_column(Boolean, default=False)

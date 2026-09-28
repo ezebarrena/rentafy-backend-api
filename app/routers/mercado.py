@@ -12,6 +12,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..cauciones import importar_cauciones
 from ..deps import get_db_financiera
 from ..financial_utils import REM_INFLACION_12M_URL, obtener_indicador_mercado
 from ..ingest import importar as importar_compararfondos
@@ -96,6 +97,13 @@ def completar_tir(db: Session = Depends(get_db_financiera)):
     POST /mercado/importar/compararfondos — si se llama antes, simplemente no encuentra
     cotizaciones de hoy con TIR faltante todavía y no completa nada."""
     return completar_tir_faltante(db)
+
+
+@router.post("/importar/cauciones")
+def importar_cauciones_endpoint(db: Session = Depends(get_db_financiera)):
+    """Dispara manualmente la actualización de tasas de caución (ver cauciones.py) sin esperar
+    al horario programado (18:09 ART). Sin dependencia de orden con los otros imports."""
+    return importar_cauciones(db)
 
 
 @router.get("/indicadores", response_model=list[IndicadorMercado])

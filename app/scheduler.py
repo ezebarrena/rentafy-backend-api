@@ -18,6 +18,7 @@ import time
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from .cauciones import importar_cauciones
 from .database import SessionFinanciera
 from .financial_utils import actualizar_todo as actualizar_financial_utils
 from .ingest import importar
@@ -76,6 +77,19 @@ def _completar_tir_faltante() -> None:
         db.close()
 
 
+def _actualizar_cauciones() -> None:
+    """Ver cauciones.py — sin dependencia de orden con los demás jobs de las 18hs (las cauciones
+    no entran al Motor de Scoring), un solo intento como el resto de las fuentes secundarias."""
+    db = SessionFinanciera()
+    try:
+        resultado = importar_cauciones(db)
+        logger.info("Actualización diaria de cauciones OK: %s", resultado)
+    except Exception as exc:  # noqa: BLE001 — se loguea, no debe tumbar el proceso
+        logger.warning("Actualización diaria de cauciones falló: %s", exc)
+    finally:
+        db.close()
+
+
 def iniciar_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=ZONA_HORARIA_MERCADO)
     scheduler.add_job(
@@ -105,6 +119,14 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=7, day_of_week="mon-fri"),
         id="completar_tir_faltante_diario",
         name=f"Relleno diario de TIR externa ({HORA_ACTUALIZACION}:07 ART)",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        _actualizar_cauciones,
+        trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=9, day_of_week="mon-fri"),
+        id="actualizar_cauciones_diario",
+        name=f"Actualización diaria de cauciones ({HORA_ACTUALIZACION}:09 ART)",
         replace_existing=True,
         misfire_grace_time=3600,
     )
