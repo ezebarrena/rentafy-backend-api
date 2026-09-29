@@ -501,10 +501,17 @@ def instrumentos_consistentes(
         instrumento = instrumentos.get(ticker)
         if instrumento is None:
             continue
+        # compute_score() puede devolver None con 2+ factores sin calcular ese día (ver su
+        # docstring) — se descarta ese punto de la serie en vez de romper mean()/pstdev(), igual
+        # criterio que el resto del sistema ante datos faltantes: no fabricar, dejar afuera.
         scores = [
-            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base)
+            s
             for f in filas_ticker
+            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base))
+            is not None
         ]
+        if len(scores) < CONSISTENCIA_MINIMO_DIAS:
+            continue
         candidatos.append(
             InstrumentoConsistente(
                 ticker=ticker,
@@ -552,10 +559,15 @@ def instrumentos_en_alza(
         instrumento = instrumentos.get(ticker)
         if instrumento is None:
             continue
+        # Ver mismo criterio en instrumentos_consistentes(): None se descarta, no se fabrica.
         scores = [
-            compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base)
+            s
             for f in filas_ticker
+            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base))
+            is not None
         ]
+        if len(scores) < CONSISTENCIA_MINIMO_DIAS:
+            continue
         pendiente, r2 = _pendiente_y_ajuste(scores)
         if pendiente <= 0 or r2 < UMBRAL_R2_EN_ALZA:
             continue
@@ -677,13 +689,15 @@ def scoring_historico(
     )
     filas.reverse()  # ascendente para el gráfico, igual que /historico
     pesos_base = pesos_vigentes(db)
-    return [
-        PuntoScore(
-            fecha=f.fecha_calculo,
-            score=compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base),
-        )
+    # compute_score() puede devolver None con 2+ factores sin calcular ese día (ver su
+    # docstring) — se omite ese punto del gráfico en vez de romper PuntoScore.score (int, no
+    # nullable): un hueco puntual en la serie es preferible a inventar un valor o tumbar el
+    # endpoint.
+    puntos = [
+        (f.fecha_calculo, compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base))
         for f in filas
     ]
+    return [PuntoScore(fecha=fecha, score=score) for fecha, score in puntos if score is not None]
 
 
 @router.get("/{ticker}", response_model=InstrumentoOut)

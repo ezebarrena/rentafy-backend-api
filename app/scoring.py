@@ -19,6 +19,11 @@ ajuste de pesos de abajo se aplica según el plazo que el usuario ELIGE, no seg�
 comparación automática entre el vencimiento de cada instrumento y esos cortes. Esa
 comparación (penalizar un descalce plazo-vencimiento) quedó fuera de esta iteración a
 propósito, ver análisis de factibilidad.
+
+Con 2 o más de los 4 factores sin calcular, compute_score() ya no redistribuye el peso entre
+los que quedan — devuelve None (ver MINIMO_FACTORES_AUSENTES_PARA_ANULAR). La redistribución
+asume que lo que sobrevive sigue siendo representativo del instrumento; con solo 2 factores
+mecánicos (Riesgo, Liquidez) y sin Rendimiento ni Estabilidad, esa suposición deja de valer.
 """
 
 from sqlalchemy.orm import Session
@@ -89,6 +94,19 @@ def _pesos_ajustados(perfil: PerfilInversor, plazo: PlazoInversion, pesos_base: 
     return {k: v / total for k, v in base.items()}
 
 
+# A partir de cuántos factores AUSENTES el Score deja de calcularse (ver docstring de
+# compute_score): con 1 solo factor faltante, los 3 restantes todavía representan una lectura
+# razonable del instrumento bajo la ponderación elegida. Con 2 o más, lo que sobrevive suele
+# ser lo más MECÁNICO (Riesgo por duration, Liquidez casi siempre calculable) y no lo que mide
+# atractivo/estabilidad real — caso real detectado: una ON casi sin operar (BF40D, 17 de 18
+# días con precio congelado) quedaba con Rendimiento y Estabilidad en None tras excluir esos
+# días congelados de las ventanas móviles (ver rentafy-servicioIA), y el Score REDISTRIBUIDO
+# subía 14-21 puntos según el perfil (Riesgo, alto por duration corta, pasaba a pesar más) —
+# exactamente lo contrario de lo que debería transmitir un instrumento que en la práctica no se
+# puede operar con confianza.
+MINIMO_FACTORES_AUSENTES_PARA_ANULAR = 2
+
+
 def compute_score(
     rendimiento: float | None,
     riesgo: float,
@@ -97,7 +115,7 @@ def compute_score(
     perfil: PerfilInversor,
     plazo: PlazoInversion = "mediano",
     pesos_base: dict[PerfilInversor, PesosPerfil] | None = None,
-) -> int:
+) -> int | None:
     """Aplica la ponderación del perfil (matizada por el plazo de inversión, ver AJUSTE_PLAZO)
     sobre los factores ya calculados.
 
@@ -112,8 +130,14 @@ def compute_score(
     relativa que ya tenían (perfil + plazo) — no en partes iguales. Un promedio simple pisaría
     la ponderación elegida (ej. "conservador" volvería a pesar riesgo y rendimiento por igual),
     que es exactamente lo que no debe pasar: cuanto más factores falten, más se acerca esta
-    fórmula a un promedio, pero nunca ignora la ponderación mientras quede más de un factor.
-    """
+    fórmula a un promedio.
+
+    Con MINIMO_FACTORES_AUSENTES_PARA_ANULAR o más factores faltantes, la redistribución deja
+    de ser confiable (ver esa constante) y el Score directamente no se calcula — None, igual
+    criterio que ya usan Rendimiento/Estabilidad para "no hay suficiente dato" en vez de
+    inventar un número. El llamador decide qué mostrar en ese caso (ver schemas.py, `score:
+    Optional[float]`; y `scoring_historico`/`instrumentos_consistentes`/`instrumentos_en_alza`
+    en routers/instrumentos.py, que descartan los puntos con None en vez de fallar)."""
     w = _pesos_ajustados(perfil, plazo, pesos_base or PESOS_PERFIL)
     factores = {
         "rendimiento": (rendimiento, w["rendimiento"]),
@@ -122,6 +146,8 @@ def compute_score(
         "estabilidad": (estabilidad, w["estabilidad"]),
     }
     presentes = [(valor, peso) for valor, peso in factores.values() if valor is not None]
+    if len(factores) - len(presentes) >= MINIMO_FACTORES_AUSENTES_PARA_ANULAR:
+        return None
     peso_total = sum(peso for _, peso in presentes)
     score = sum(valor * peso for valor, peso in presentes) / peso_total
     return round(score)
