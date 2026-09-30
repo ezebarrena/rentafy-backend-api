@@ -70,6 +70,37 @@ def _mapear_tipo(bond: dict) -> tuple[str, str | None]:
     return tipo, subtipo
 
 
+# La fuente manda tipo="Provincial" pero no un campo de emisor estructurado con la provincia
+# real — antes se colapsaba todo a un string genérico ("Gobierno provincial"), perdiendo la
+# distinción entre, por ejemplo, PBA y Chubut. El nombre del bono SÍ trae la provincia/ciudad al
+# principio (ej. "PBA 2037 Serie A USD", "Córdoba 9,75% 2032") — se detecta por prefijo, mismo
+# criterio aproximado que ya usa _derivar_emisor para ON (no hay un campo estructurado mejor).
+# Orden importa: "MUNICIPALIDAD DE CÓRDOBA" antes que "CÓRDOBA" sola, porque la contiene.
+_PROVINCIAS_POR_PREFIJO: list[tuple[str, str]] = [
+    ("MUNICIPALIDAD DE CÓRDOBA", "Municipalidad de Córdoba"),
+    ("PBA", "Provincia de Buenos Aires"),
+    ("CABA", "Ciudad Autónoma de Buenos Aires"),
+    ("CÓRDOBA", "Provincia de Córdoba"),
+    ("CHUBUT", "Provincia de Chubut"),
+    ("NEUQUÉN", "Provincia de Neuquén"),
+    ("SANTA FE", "Provincia de Santa Fe"),
+    ("MENDOZA", "Provincia de Mendoza"),
+    ("RÍO NEGRO", "Provincia de Río Negro"),
+]
+
+
+def _derivar_emisor_provincial(nombre: str) -> str:
+    """Ver _PROVINCIAS_POR_PREFIJO. Sin prefijo reconocido (ej. "Bocón Consolidación...", que
+    pese a venir marcado tipo="Provincial" en la fuente es en realidad deuda de consolidación
+    NACIONAL, no de una provincia puntual) se cae al genérico de antes — mejor un genérico
+    honesto que asignarle una provincia incorrecta por error."""
+    nombre_upper = nombre.upper()
+    for prefijo, canonico in _PROVINCIAS_POR_PREFIJO:
+        if nombre_upper.startswith(prefijo):
+            return canonico
+    return "Gobierno provincial"
+
+
 _EMISOR_ON_CORTE_RE = re.compile(
     r"""
     \bCl\.?\s*[IVXLC0-9]+\b   # marcador de clase/serie: "Cl.17", "Cl 2", "Cl. IV"
@@ -96,7 +127,7 @@ def _derivar_emisor(bond: dict) -> str:
     if tipo in ("Soberano", "FIJA", "CER", "DUAL", "TAMAR", "DL", "LECAP", "BONCAP"):
         return "República Argentina" if moneda == "USD" else "Tesoro Nacional"
     if tipo == "Provincial":
-        return "Gobierno provincial"
+        return _derivar_emisor_provincial(bond["nombre"])
     nombre = bond["nombre"]
     corte = _EMISOR_ON_CORTE_RE.search(nombre)
     emisor = nombre[: corte.start()] if corte else nombre
