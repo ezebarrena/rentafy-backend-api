@@ -125,6 +125,16 @@ def listar_instrumentos(
     riesgo: Optional[str] = None,
     liquidez: Optional[str] = None,
     plazo_vencimiento: Optional[Literal["corto", "mediano", "largo"]] = None,
+    excluir_vencidos: bool = Query(
+        False,
+        description=(
+            "Saca los instrumentos ya vencidos (vencimiento < hoy), aunque el backend los "
+            "mantenga activo=True durante el mes de gracia post-vencimiento (ver "
+            "ingest.py:_marcar_vencidos_como_inactivos). Pensado para rankings/listados de "
+            "'oportunidades' donde un bono vencido no tiene sentido recomendar — el Comparador "
+            "y otros usos que sí quieren ver vencidos simplemente no mandan este parámetro."
+        ),
+    ),
     emisor: Optional[str] = None,
     tir_min: Optional[float] = None,
     tir_max: Optional[float] = None,
@@ -160,8 +170,10 @@ def listar_instrumentos(
         query = query.filter(Instrumento.moneda == moneda)
     if liquidez and liquidez != "TODOS":
         query = query.filter(Instrumento.liquidez == liquidez)
+    hoy = date.today()
+    if excluir_vencidos:
+        query = query.filter(Instrumento.vencimiento >= hoy)
     if plazo_vencimiento:
-        hoy = date.today()
         corte_corto = hoy + timedelta(days=_DIAS_CORTO_MAXIMO)
         corte_mediano = hoy + timedelta(days=_DIAS_MEDIANO_MAXIMO)
         if plazo_vencimiento == "corto":
