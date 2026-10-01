@@ -272,7 +272,8 @@ def opciones_instrumentos(db: Session = Depends(get_db_financiera)):
     )
     return [
         InstrumentoOpcion(
-            ticker=i.ticker, nombre=i.nombre, tipo=i.tipo, subtipo=i.subtipo, moneda=i.moneda
+            ticker=i.ticker, nombre=i.nombre, tipo=i.tipo, subtipo=i.subtipo, moneda=i.moneda,
+            vencimiento=i.vencimiento,
         )
         for i in instrumentos
     ]

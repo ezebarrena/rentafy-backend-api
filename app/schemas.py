@@ -90,13 +90,16 @@ class InstrumentoOut(BaseModel):
 
 class InstrumentoOpcion(BaseModel):
     """Versión mínima para selectores (Comparador, Calculadora): sin cotización ni score,
-    para poder listar el catálogo completo sin paginar."""
+    para poder listar el catálogo completo sin paginar. `vencimiento` se agregó para que la
+    Calculadora pueda filtrar vencidos del lado del cliente sin afectar al Comparador, que
+    usa este mismo endpoint y sí quiere seguir viéndolos."""
 
     ticker: str
     nombre: str
     tipo: TipoInstrumento
     subtipo: Optional[str] = None
     moneda: Moneda
+    vencimiento: date
 
 
 class InstrumentoConsistente(BaseModel):
