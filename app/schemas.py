@@ -205,6 +205,7 @@ class UsuarioOut(BaseModel):
     email: EmailStr
     perfilInversor: PerfilInversor
     plazoInversion: PlazoInversion
+    esAdmin: bool = False
 
 
 class PerfilInversorUpdate(BaseModel):

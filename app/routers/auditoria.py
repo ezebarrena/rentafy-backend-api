@@ -6,11 +6,12 @@ servicio escucha en 127.0.0.1 de la EC2 a propósito y el navegador nunca le peg
 """
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import IA_SERVICE_URL
+from ..deps import require_admin
 
-router = APIRouter(prefix="/auditoria", tags=["auditoria"])
+router = APIRouter(prefix="/auditoria", tags=["auditoria"], dependencies=[Depends(require_admin)])
 
 
 @router.get("/panel")

@@ -9,13 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..config import IA_SERVICE_URL
-from ..deps import get_db_financiera
+from ..deps import get_db_financiera, require_admin
 from ..models_financiera import Instrumento, Scoring
 from ..scoring import AJUSTE_PLAZO, PESOS_PERFIL, _pesos_ajustados, pesos_vigentes
 from ..schemas import PerfilInversor, PlazoInversion
 from ..serializers import ultimas_cotizaciones, ultimos_scoring
 
-router = APIRouter(prefix="/instrumentos", tags=["debug"])
+# Todo este router es de testeo interno: solo admins (ver require_admin en deps.py).
+router = APIRouter(prefix="/instrumentos", tags=["debug"], dependencies=[Depends(require_admin)])
 
 
 def _pesos_explicado(db: Session, ticker: str, perfil: PerfilInversor, plazo: PlazoInversion) -> dict:

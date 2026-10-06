@@ -8,7 +8,7 @@ from google.oauth2 import id_token as google_id_token
 from sqlalchemy.orm import Session
 
 from ..config import GOOGLE_CLIENT_ID
-from ..deps import get_current_user, get_db_no_financiera
+from ..deps import es_admin, get_current_user, get_db_no_financiera
 from ..models_no_financiera import PerfilInversorHistorial, PlazoInversionHistorial, Usuario
 from ..schemas import (
     GoogleLogin,
@@ -45,6 +45,7 @@ def _to_out(usuario: Usuario) -> UsuarioOut:
         email=usuario.email,
         perfilInversor=_perfil_vigente(usuario),
         plazoInversion=_plazo_vigente(usuario),
+        esAdmin=es_admin(usuario),
     )
 
 

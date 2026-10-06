@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
+from .config import ADMIN_EMAILS
 from .database import SessionFinanciera, SessionNoFinanciera
 from .models_no_financiera import Usuario
 from .security import decode_access_token
@@ -43,4 +44,16 @@ def get_current_user(
     usuario = db.query(Usuario).filter(Usuario.email == email).first()
     if usuario is None:
         raise credenciales_invalidas
+    return usuario
+
+
+def es_admin(usuario: Usuario) -> bool:
+    return usuario.email.strip().lower() in ADMIN_EMAILS
+
+
+def require_admin(usuario: Usuario = Depends(get_current_user)) -> Usuario:
+    """Solo admins (ver ADMIN_EMAILS en config.py). 401 si no hay sesión, 403 si hay sesión pero
+    no es admin: ocultar el menú en el front no alcanza, estos endpoints son de testeo interno."""
+    if not es_admin(usuario):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requiere rol de administrador")
     return usuario
