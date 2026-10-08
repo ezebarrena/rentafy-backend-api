@@ -206,6 +206,9 @@ class UsuarioOut(BaseModel):
     perfilInversor: PerfilInversor
     plazoInversion: PlazoInversion
     esAdmin: bool = False
+    # False hasta que el usuario elige (o confirma) su perfil y su horizonte: el front le muestra el test de perfil
+    # inversor la primera vez. Ver _perfil_configurado en routers/auth.py.
+    perfilConfigurado: bool = False
 
 
 class PerfilInversorUpdate(BaseModel):

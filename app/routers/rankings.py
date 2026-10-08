@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from ..deps import get_db_financiera
+from ..deps import get_db_financiera, solicitante_es_admin
 from ..models_financiera import Instrumento, Modelo
 from ..schemas import PaginatedInstrumentos, PerfilInversor, PlazoInversion, ScoreRentafyPesosOut
 from ..scoring import pesos_vigentes
@@ -55,14 +55,14 @@ def ranking(
 
 
 @router.get("/score-rentafy/pesos", response_model=ScoreRentafyPesosOut)
-def pesos_por_perfil(db: Session = Depends(get_db_financiera)):
-    """RF-34: pesos vigentes por perfil, usados por la página "¿Qué es el Score Rentafy?" y por
-    el pie de página global (ver DataSourceNote.tsx, "Modelo vX · actualizado el...").
+def pesos_por_perfil(es_admin: bool = Depends(solicitante_es_admin), db: Session = Depends(get_db_financiera)):
+    """Modelo de scoring activo (para el pie de página global, ver DataSourceNote.tsx: "Modelo vX · actualizado
+    el...") y, SOLO para un admin con sesión, los pesos vigentes por perfil (los usa la página de admin
+    "Ponderación Score"). Para cualquier otro visitante `pesos` viene vacío: la ponderación del Score es la
+    fórmula propia de Rentafy y no se publica (antes este endpoint la devolvía a cualquiera, sin login).
 
-    Antes de esta versión devolvía siempre el diccionario estático PESOS_PERFIL sin importar
-    el modeloId reportado — un bug real: el modeloId ya reflejaba el Modelo activo, pero los
-    pesos no. Ahora usa pesos_vigentes(), la misma fuente que compute_score()."""
+    Los pesos salen de pesos_vigentes(), la misma fuente que compute_score()."""
     modelo_activo = db.query(Modelo).filter(Modelo.activo == True).first()  # noqa: E712
     modelo_id = modelo_activo.id if modelo_activo else "v1.4.0"
     publicado_en = modelo_activo.publicado_en if modelo_activo else None
-    return ScoreRentafyPesosOut(modeloId=modelo_id, publicadoEn=publicado_en, pesos=pesos_vigentes(db))
+    return ScoreRentafyPesosOut(modeloId=modelo_id, publicadoEn=publicado_en, pesos=pesos_vigentes(db) if es_admin else {})

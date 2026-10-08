@@ -37,6 +37,14 @@ def _plazo_vigente(usuario: Usuario) -> str:
     return max(usuario.plazos, key=lambda p: p.actualizado_en).plazo
 
 
+def _perfil_configurado(usuario: Usuario) -> bool:
+    """Registro y login con Google crean un perfil y un plazo por defecto (moderado / mediano), así que "tiene un
+    perfil" no distingue a quien nunca eligió. Cada vez que el usuario guarda su perfil o su horizonte (el test o
+    la selección manual) se AGREGA un registro al historial, aunque el valor sea el mismo: más de uno = ya lo
+    configuró. No requiere ninguna columna nueva."""
+    return len(usuario.perfiles) > 1 or len(usuario.plazos) > 1
+
+
 def _to_out(usuario: Usuario) -> UsuarioOut:
     return UsuarioOut(
         id=usuario.id,
@@ -46,6 +54,7 @@ def _to_out(usuario: Usuario) -> UsuarioOut:
         perfilInversor=_perfil_vigente(usuario),
         plazoInversion=_plazo_vigente(usuario),
         esAdmin=es_admin(usuario),
+        perfilConfigurado=_perfil_configurado(usuario),
     )
 
 

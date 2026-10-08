@@ -57,3 +57,17 @@ def require_admin(usuario: Usuario = Depends(get_current_user)) -> Usuario:
     if not es_admin(usuario):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requiere rol de administrador")
     return usuario
+
+
+def solicitante_es_admin(
+    token: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db_no_financiera)
+) -> bool:
+    """True solo si la request trae la sesión válida de un admin. A diferencia de require_admin, NUNCA levanta:
+    sirve para endpoints públicos que muestran algo más (o algo distinto) a un admin sin pedirle login al resto."""
+    if token is None:
+        return False
+    email = decode_access_token(token)
+    if email is None:
+        return False
+    usuario = db.query(Usuario).filter(Usuario.email == email).first()
+    return usuario is not None and es_admin(usuario)
