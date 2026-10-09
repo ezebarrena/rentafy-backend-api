@@ -22,6 +22,7 @@ from .cauciones import importar_cauciones
 from .database import SessionFinanciera
 from .financial_utils import actualizar_todo as actualizar_financial_utils
 from .ingest import importar
+from .referencias import actualizar as actualizar_referencias
 from .tir_externo import completar_tir_faltante
 
 logger = logging.getLogger("rentafy.scheduler")
@@ -90,6 +91,18 @@ def _actualizar_cauciones() -> None:
         db.close()
 
 
+def _actualizar_referencias() -> None:
+    """Ver referencias.py: baja las series (UVA, dólar MEP, plazo fijo) con las que se comparan los rendimientos. Fuente
+    secundaria: un solo intento y, si falla, queda lo que ya estaba guardado."""
+    db = SessionFinanciera()
+    try:
+        logger.info("Actualización diaria de series de referencia OK: %s", actualizar_referencias(db))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Actualización diaria de series de referencia falló: %s", exc)
+    finally:
+        db.close()
+
+
 def iniciar_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=ZONA_HORARIA_MERCADO)
     scheduler.add_job(
@@ -127,6 +140,14 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=9, day_of_week="mon-fri"),
         id="actualizar_cauciones_diario",
         name=f"Actualización diaria de cauciones ({HORA_ACTUALIZACION}:09 ART)",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        _actualizar_referencias,
+        trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=11, day_of_week="mon-fri"),
+        id="actualizar_referencias_diario",
+        name=f"Actualización diaria de series de referencia ({HORA_ACTUALIZACION}:11 ART)",
         replace_existing=True,
         misfire_grace_time=3600,
     )

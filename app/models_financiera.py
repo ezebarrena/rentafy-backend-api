@@ -231,3 +231,16 @@ class CalificacionCrediticia(BaseFinanciera):
     rating_numerico: Mapped[float] = mapped_column(Float)
     fecha_actualizacion: Mapped[date] = mapped_column(Date)
     fuente_url: Mapped[str] = mapped_column(String(300), default="")
+
+
+class SerieReferencia(BaseFinanciera):
+    """Historial diario de las series con las que se comparan los rendimientos (ver referencias.py): `uva` (sigue la
+    inflación día a día), `mep` (dólar bolsa, venta) y `tasa_pf` (TNA de depósitos a plazo fijo a 30 días, en %).
+    A diferencia de IndicadorMacro, acá SÍ se guarda el historial: para comparar un rendimiento entre dos fechas hace
+    falta el valor en cada una. Se actualiza una vez por día y se conservan solo los últimos DIAS_HISTORIA días."""
+
+    __tablename__ = "series_referencia"
+
+    nombre: Mapped[str] = mapped_column(String(20), primary_key=True)
+    fecha: Mapped[date] = mapped_column(Date, primary_key=True)
+    valor: Mapped[float] = mapped_column(Float)
