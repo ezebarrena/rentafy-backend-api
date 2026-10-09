@@ -28,3 +28,16 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split("
 # mismo servidor", nunca la compu de quien abre el navegador. Solo lo usa /debug (routers/debug.py,
 # testeo interno): el resto del backend no depende de este servicio para nada.
 IA_SERVICE_URL = os.getenv("IA_SERVICE_URL", "http://localhost:8090")
+
+# Envío de mails (verificación de cuenta, recuperación de contraseña). SMTP genérico: sirve igual para una cuenta
+# de Gmail (smtp.gmail.com, puerto 587, con una "contraseña de aplicación") que para Amazon SES u otro servicio:
+# cambiar de uno a otro es cambiar estas variables, no código. Sin SMTP_HOST el servicio NO envía nada: escribe el
+# mail (con su código) en el log del backend, para poder probar el flujo completo sin una cuenta de correo.
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+EMAIL_REMITENTE = os.getenv("EMAIL_REMITENTE", SMTP_USER)
+EMAIL_REMITENTE_NOMBRE = os.getenv("EMAIL_REMITENTE_NOMBRE", "Rentafy")
+# Dirección pública de la app: se usa para los links de los mails.
+APP_URL = os.getenv("APP_URL", "https://rentafy-app.com.ar").rstrip("/")

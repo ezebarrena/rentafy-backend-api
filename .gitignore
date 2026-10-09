@@ -22,3 +22,6 @@ Thumbs.db
 
 # Base de datos local (SQLite)
 *.db
+
+# Vista previa local de los mails (se genera con scripts/previsualizar_emails.py)
+preview_emails/

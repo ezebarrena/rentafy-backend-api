@@ -186,6 +186,30 @@ class UsuarioLogin(BaseModel):
     password: str
 
 
+class EmailIn(BaseModel):
+    email: EmailStr
+
+
+class VerificarEmailIn(BaseModel):
+    email: EmailStr
+    codigo: str = Field(min_length=1, max_length=20)
+
+
+class RestablecerPasswordIn(BaseModel):
+    email: EmailStr
+    codigo: str = Field(min_length=1, max_length=20)
+    password: str = Field(min_length=6)
+
+
+class CambiarPasswordIn(BaseModel):
+    passwordActual: str
+    passwordNueva: str = Field(min_length=6)
+
+
+class MensajeOut(BaseModel):
+    mensaje: str
+
+
 class GoogleLogin(BaseModel):
     """ID token que devuelve Google Identity Services en el frontend tras el login con Google;
     se valida server-side contra la API de Google antes de confiar en su contenido."""
