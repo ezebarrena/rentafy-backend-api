@@ -76,6 +76,7 @@ class InstrumentoOut(BaseModel):
     riesgo: NivelRiesgo
     liquidez: NivelLiquidez
     precioStale: bool = False
+    fechaCotizacion: Optional[date] = Field(default=None, description="Fecha de la cotización que se está mostrando (la última cargada del instrumento).")
     factores: Optional[FactoresScore] = Field(
         default=None, description="Null cuando el instrumento todavía no tiene Scoring calculado (RNF-29)"
     )

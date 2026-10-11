@@ -8,6 +8,7 @@ from .config import CORS_ORIGINS
 from .database import BaseFinanciera, BaseNoFinanciera, SessionFinanciera, engine_financiera, engine_no_financiera
 from .routers import auditoria, auth, calendario, calibracion, debug, estado_ia, evaluacion, instrumentos, mercado, rankings, rendimiento, watchlist
 from .scheduler import iniciar_scheduler
+from .seguridad import SeguridadMiddleware
 from .seed import seed_if_empty
 
 # Se importan explícitamente para que create_all() conozca todas las tablas de cada base.
@@ -37,6 +38,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# El de seguridad se agrega ANTES que CORS: en Starlette el último agregado queda más afuera, y así la respuesta 429 también lleva las
+# cabeceras CORS (si no, el navegador no deja leer el error y la app no puede mostrar el mensaje).
+app.add_middleware(SeguridadMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,

@@ -1,15 +1,49 @@
 name: Deploy a EC2
 
+# Prod está encendido de lunes a viernes de 17 a 20 hs (ver deploy/ventana_prod.sh); fuera de esa ventana la EC2 está apagada y un deploy por SSH no
+# tiene a dónde conectarse. Por eso:
+#  - push a main: si prod está encendido, despliega en el momento; si está apagado lo avisa SIN fallar, y el cambio se despliega solo
+#    en la próxima ventana (el siguiente disparo programado).
+#  - programado, lunes a viernes 17:05 hs de Argentina (20:05 UTC): espera a que prod termine de encenderse y despliega lo último de main,
+#    antes de que corran los jobs de las 18:00. Si prod no responde tras ~10 minutos, el job falla para que se note.
+#  - a mano (workflow_dispatch): igual que el programado; sirve para desplegar de urgencia después de encender prod con ventana_prod.sh encender.
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "5 20 * * 1-5"
   workflow_dispatch: {}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Verificar si prod está encendido
+        id: prod
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          # Un push solo mira una vez; el disparo programado o manual espera hasta ~10 minutos a que termine de arrancar.
+          intentos=1
+          if [ "${{ github.event_name }}" != "push" ]; then intentos=20; fi
+          for i in $(seq 1 "$intentos"); do
+            if nc -z -w 10 "$EC2_HOST" 22; then
+              echo "encendido=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [ "$i" -lt "$intentos" ] && sleep 30
+          done
+          echo "encendido=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Prod está apagado: este cambio se desplegará solo en la próxima ventana (lunes a viernes 17:05 hs)."
+
+      - name: Prod no responde en el horario programado
+        if: steps.prod.outputs.encendido != 'true' && github.event_name != 'push'
+        run: |
+          echo "::error::Prod no respondió por SSH tras ~10 minutos: no se pudo desplegar. Revisá si la EC2 y la RDS se encendieron."
+          exit 1
+
       - name: SSH deploy
+        if: steps.prod.outputs.encendido == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}

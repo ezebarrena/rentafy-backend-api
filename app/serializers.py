@@ -207,6 +207,7 @@ def to_detail(
         riesgo=_riesgo_bucket(sc.riesgo) if sc is not None else instrumento.riesgo,
         liquidez=instrumento.liquidez,
         precioStale=cot.precio_stale,
+        fechaCotizacion=cot.fecha,
         factores=(
             FactoresScore(
                 rendimiento=sc.rendimiento,

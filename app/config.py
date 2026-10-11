@@ -41,3 +41,12 @@ EMAIL_REMITENTE = os.getenv("EMAIL_REMITENTE", SMTP_USER)
 EMAIL_REMITENTE_NOMBRE = os.getenv("EMAIL_REMITENTE_NOMBRE", "Rentafy")
 # Dirección pública de la app: se usa para los links de los mails.
 APP_URL = os.getenv("APP_URL", "https://rentafy-app.com.ar").rstrip("/")
+
+# Límite de solicitudes (app/seguridad.py): por IP y ventana. Las rutas de acceso (login, registro, códigos por mail) tienen un tope
+# propio, mucho más bajo, para frenar fuerza bruta y abuso del envío de mails. Con RATE_LIMIT_ENABLED=0 se desactiva sin tocar código.
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "1") != "0"
+RATE_LIMIT_VENTANA_SEG = int(os.getenv("RATE_LIMIT_VENTANA_SEG", "60"))
+RATE_LIMIT_GENERAL = int(os.getenv("RATE_LIMIT_GENERAL", "300"))  # solicitudes por IP y ventana (una pantalla hace varias)
+RATE_LIMIT_ACCESO = int(os.getenv("RATE_LIMIT_ACCESO", "10"))  # solicitudes por IP y ventana a login/registro/códigos
+# Solo para pruebas locales: limitar también las solicitudes que llegan por loopback sin cabecera de proxy (en producción nginx las trae).
+RATE_LIMIT_LOOPBACK = os.getenv("RATE_LIMIT_LOOPBACK", "0") == "1"
