@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS
 from .database import BaseFinanciera, BaseNoFinanciera, SessionFinanciera, engine_financiera, engine_no_financiera
-from .routers import auditoria, auth, calendario, calibracion, debug, estado_ia, evaluacion, instrumentos, mercado, oportunidades, rankings, rendimiento, watchlist
+from .routers import auditoria, auth, calendario, calibracion, curvas_macro, debug, estado_ia, evaluacion, instrumentos, mercado, oportunidades, rankings, rendimiento, watchlist
 from .scheduler import iniciar_scheduler
 from .seguridad import SeguridadMiddleware
 from .seed import seed_if_empty
@@ -51,6 +51,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(instrumentos.router)
+app.include_router(curvas_macro.router)
 app.include_router(rankings.router)
 app.include_router(watchlist.router)
 app.include_router(calendario.router)

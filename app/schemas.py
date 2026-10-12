@@ -358,3 +358,84 @@ class CurvaUnica(BaseModel):
     # inflación mensual. None si la fuente no respondió (el front cae a la mensualización del REM).
     inflacionMensualUltima: Optional[float] = None
     inflacionMensualMes: Optional[str] = None
+
+
+class PuntoRiesgoPais(BaseModel):
+    fecha: date
+    valor: float
+
+
+class PuntoDolarEquilibrio(BaseModel):
+    ticker: str
+    nombre: str
+    familia: FamiliaCurvaUnica
+    plazoDias: int
+    tir: float
+    # Suba (%) del dólar hasta el vencimiento que iguala al bono con comprar dólares.
+    subaDelDolar: float
+
+
+class DolarEquilibrio(BaseModel):
+    instrumentos: list[PuntoDolarEquilibrio]
+    # Dólar MEP y CCL de referencia (venta) y su fecha: el front multiplica cada uno por (1 + suba) para dar el dólar de equilibrio.
+    dolarMep: Optional[float] = None
+    dolarMepFecha: Optional[date] = None
+    dolarCcl: Optional[float] = None
+    dolarCclFecha: Optional[date] = None
+
+
+class PuntoInflacion(BaseModel):
+    fecha: date
+    mensual: Optional[float] = None
+    interanual: Optional[float] = None
+
+
+class InflacionOut(BaseModel):
+    serie: list[PuntoInflacion]
+    # Inflación esperada a 12 meses (REM, BCRA), en % anual, y el día en que se guardó.
+    inflacionEsperadaAnual: Optional[float] = None
+    inflacionEsperadaFecha: Optional[date] = None
+
+
+class PuntoInflacionEquilibrio(BaseModel):
+    ticker: str
+    nombre: str
+    plazoDias: int
+    tirReal: float
+    # Tasa fija en pesos del mismo plazo según la curva de tasa fija, y la inflación que iguala al CER con ella.
+    tasaFija: float
+    inflacionEquilibrioAnual: float
+    inflacionEquilibrioMensual: float
+
+
+class InflacionEquilibrio(BaseModel):
+    bonos: list[PuntoInflacionEquilibrio]
+    inflacionMensualUltima: Optional[float] = None
+    inflacionMensualMes: Optional[str] = None
+    inflacionEsperadaAnual: Optional[float] = None
+    # Cuántos instrumentos de tasa fija se usaron para la curva y su R².
+    instrumentosTasaFija: int = 0
+    r2: Optional[float] = None
+
+
+class PuntoDolares(BaseModel):
+    fecha: date
+    mep: Optional[float] = None
+    ccl: Optional[float] = None
+
+
+class SensibilidadBono(BaseModel):
+    ticker: str
+    nombre: str
+    duration: Optional[float] = None
+    tir: Optional[float] = None
+    # Variación aproximada del precio (%) por cada +100 pb de riesgo país (negativa si el precio baja), R² y observaciones usadas.
+    porCada100pb: float
+    r2: float
+    observaciones: int
+
+
+class SensibilidadRiesgoPais(BaseModel):
+    bonos: list[SensibilidadBono]
+    desde: date
+    hasta: date
