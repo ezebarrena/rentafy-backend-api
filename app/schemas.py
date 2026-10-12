@@ -1,10 +1,12 @@
 """Schemas Pydantic — espejo de rentafy-frontend/src/data/types.ts, para que la forma de la
 respuesta del backend coincida exactamente con lo que el frontend ya espera."""
 
+import re
 from datetime import date, datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, EmailStr, Field
+from typing_extensions import Annotated
 
 TipoInstrumento = Literal["BONO", "LECAP", "BONCAP", "ON", "CAUCION"]
 Moneda = Literal["ARS", "USD"]
@@ -175,11 +177,69 @@ class ScoreRentafyPesosOut(BaseModel):
 # --- Auth / usuario ---
 
 
+# Largos máximos de lo que el usuario escribe de sí mismo: nombre y apellido hasta 20 caracteres cada uno y el avatar (nombre imaginario) hasta 10.
+MAX_NOMBRE = 20
+MAX_AVATAR = 10
+MAX_EMAIL = 100
+MIN_PASSWORD = 8
+MAX_PASSWORD = 72  # bcrypt solo mira los primeros 72 bytes: más largo no suma seguridad y se prestaría a confusión
+
+# Nombre y apellido: solo letras (con acentos), y entre palabras un espacio, apóstrofe, guion o punto (María José, O'Brien, De la Fuente).
+_NOMBRE_VALIDO = re.compile(r"^[^\W\d_]+(?:[ '.\-][^\W\d_]+)*\.?$")
+
+
+def _nombre_de_persona(v: str, *, obligatorio: bool) -> str:
+    v = " ".join(v.split())  # sin espacios de más al principio, al final ni repetidos
+    if not v:
+        if obligatorio:
+            raise ValueError("Ingresá tu nombre")
+        return v
+    if not _NOMBRE_VALIDO.match(v):
+        raise ValueError("Solo letras, espacios, guiones y apóstrofes (sin números ni símbolos)")
+    return v
+
+
+def _nombre_obligatorio(v: str) -> str:
+    return _nombre_de_persona(v, obligatorio=True)
+
+
+def _apellido_opcional(v: str) -> str:
+    return _nombre_de_persona(v, obligatorio=False)
+
+
+def _email_acotado(v: str) -> str:
+    if len(v) > MAX_EMAIL:
+        raise ValueError(f"El correo puede tener hasta {MAX_EMAIL} caracteres")
+    return v.strip()  # no se pasa a minúsculas: el login busca el correo tal cual se escribió al registrarse
+
+
+def validar_password_nueva(v: str) -> str:
+    """Contraseña que se elige (registro, restablecer, cambiar): 8 a 72 caracteres con al menos una mayúscula, una minúscula y un número.
+    El login no la aplica: las cuentas anteriores pueden tener una más corta y tienen que poder entrar."""
+    if len(v) < MIN_PASSWORD:
+        raise ValueError(f"La contraseña debe tener al menos {MIN_PASSWORD} caracteres")
+    if len(v) > MAX_PASSWORD:
+        raise ValueError(f"La contraseña puede tener hasta {MAX_PASSWORD} caracteres")
+    if not re.search(r"[A-ZÁÉÍÓÚÑÜ]", v):
+        raise ValueError("La contraseña debe tener al menos una letra mayúscula")
+    if not re.search(r"[a-záéíóúñü]", v):
+        raise ValueError("La contraseña debe tener al menos una letra minúscula")
+    if not re.search(r"\d", v):
+        raise ValueError("La contraseña debe tener al menos un número")
+    return v
+
+
+NombreObligatorio = Annotated[str, Field(min_length=1, max_length=MAX_NOMBRE), AfterValidator(_nombre_obligatorio)]
+ApellidoOpcional = Annotated[str, Field(max_length=MAX_NOMBRE), AfterValidator(_apellido_opcional)]
+EmailRegistro = Annotated[EmailStr, AfterValidator(_email_acotado)]
+PasswordNueva = Annotated[str, AfterValidator(validar_password_nueva)]
+
+
 class UsuarioRegistro(BaseModel):
-    nombre: str
-    apellido: str = ""
-    email: EmailStr
-    password: str = Field(min_length=6)
+    nombre: NombreObligatorio
+    apellido: ApellidoOpcional = ""
+    email: EmailRegistro
+    password: PasswordNueva
 
 
 class UsuarioLogin(BaseModel):
@@ -199,12 +259,12 @@ class VerificarEmailIn(BaseModel):
 class RestablecerPasswordIn(BaseModel):
     email: EmailStr
     codigo: str = Field(min_length=1, max_length=20)
-    password: str = Field(min_length=6)
+    password: PasswordNueva
 
 
 class CambiarPasswordIn(BaseModel):
     passwordActual: str
-    passwordNueva: str = Field(min_length=6)
+    passwordNueva: PasswordNueva
 
 
 class MensajeOut(BaseModel):
@@ -233,6 +293,8 @@ class UsuarioOut(BaseModel):
     esAdmin: bool = False
     # Plan vigente ("casual" por defecto; los admin figuran como "pro"). Ver planes.py.
     plan: Literal["casual", "pro"] = "casual"
+    # Nombre imaginario (hasta 10 caracteres) que se muestra en la barra y en el resto de la app; None si no eligió uno.
+    avatar: Optional[str] = None
     # False hasta que el usuario elige (o confirma) su perfil y su horizonte: el front le muestra el test de perfil
     # inversor la primera vez. Ver _perfil_configurado en routers/auth.py.
     perfilConfigurado: bool = False
@@ -256,8 +318,10 @@ class PlazoInversionUpdate(BaseModel):
 
 
 class UsuarioNombreUpdate(BaseModel):
-    nombre: str = Field(min_length=1)
-    apellido: str = ""
+    nombre: NombreObligatorio
+    apellido: ApellidoOpcional = ""
+    # Si no viene, no se toca el avatar actual; vacío (o solo espacios) lo borra y la app vuelve a mostrar el nombre.
+    avatar: Optional[str] = Field(default=None, max_length=MAX_AVATAR + 20)  # el tope real se valida ya sin espacios (ver routers/auth.py)
 
 
 # --- Watchlist / calendario / mercado ---

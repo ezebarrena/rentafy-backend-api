@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import codigos, email_templates, emailing
 from ..config import GOOGLE_CLIENT_ID, PLAN_SWITCH_HABILITADO
 from ..deps import es_admin, get_current_user, get_db_no_financiera
-from ..models_no_financiera import PerfilInversorHistorial, PlanUsuario, PlazoInversionHistorial, Usuario
+from ..models_no_financiera import AvatarUsuario, PerfilInversorHistorial, PlanUsuario, PlazoInversionHistorial, Usuario
 from ..planes import LIMITE_FAVORITOS, PLAN_CASUAL, plan_de
 from ..schemas import (
     CambiarPasswordIn,
@@ -21,6 +21,8 @@ from ..schemas import (
     VerificarEmailIn,
     GoogleLogin,
     PerfilInversorUpdate,
+    MAX_AVATAR,
+    MAX_NOMBRE,
     PlanCambiadoOut,
     PlanUpdate,
     PlazoInversionUpdate,
@@ -84,6 +86,7 @@ def _to_out(usuario: Usuario) -> UsuarioOut:
         plazoInversion=_plazo_vigente(usuario),
         esAdmin=es_admin(usuario),
         plan=plan_de(usuario),
+        avatar=usuario.avatar_registro.avatar if usuario.avatar_registro is not None else None,
         perfilConfigurado=_perfil_configurado(usuario),
     )
 
@@ -150,8 +153,8 @@ def login_google(datos: GoogleLogin, db: Session = Depends(get_db_no_financiera)
             usuario.sso_id = payload["sub"]  # cuenta ya existía por email/password: se vincula con Google
         else:
             usuario = Usuario(
-                nombre=payload.get("given_name", ""),
-                apellido=payload.get("family_name", ""),
+                nombre=payload.get("given_name", "")[:MAX_NOMBRE],  # Google no respeta nuestro tope de 20 caracteres
+                apellido=payload.get("family_name", "")[:MAX_NOMBRE],
                 email=payload["email"],
                 # password_hash es NOT NULL pero esta cuenta solo loguea vía Google; el hash de
                 # un valor al azar la deja simplemente inutilizable para /auth/login.
@@ -241,10 +244,25 @@ def me(usuario: Usuario = Depends(get_current_user)):
 def actualizar_nombre(
     datos: UsuarioNombreUpdate, usuario: Usuario = Depends(get_current_user), db: Session = Depends(get_db_no_financiera)
 ):
-    """Editar nombre/apellido (RF-04) — el email no es editable acá: identifica la cuenta y
+    """Editar nombre/apellido (RF-04) y el avatar (nombre imaginario) — el email no es editable acá: identifica la cuenta y
     está atado al login, cambiarlo requeriría reverificarlo."""
     usuario.nombre = datos.nombre
     usuario.apellido = datos.apellido
+    if "avatar" in datos.model_fields_set:  # un cliente que no lo manda no lo pisa
+        avatar = (datos.avatar or "").strip()
+        if len(avatar) > MAX_AVATAR:
+            raise HTTPException(422, f"El avatar puede tener hasta {MAX_AVATAR} caracteres")
+        if any(c in "<>&\"" or not c.isprintable() for c in avatar):
+            raise HTTPException(422, "El avatar no puede tener símbolos como < > & \" ni caracteres de control")
+        registro = usuario.avatar_registro
+        if not avatar:
+            if registro is not None:
+                db.delete(registro)
+        elif registro is None:
+            db.add(AvatarUsuario(usuario_id=usuario.id, avatar=avatar))
+        else:
+            registro.avatar = avatar
+            registro.actualizado_en = datetime.utcnow()
     db.commit()
     db.refresh(usuario)
     return _to_out(usuario)

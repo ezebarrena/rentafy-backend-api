@@ -34,6 +34,8 @@ class Usuario(BaseNoFinanciera):
     favoritos: Mapped[list["Favorito"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
     # Plan Casual/Pro (ver PlanUsuario): sin fila = Casual. Tabla aparte a propósito, para no tener que migrar `usuarios`.
     plan_registro: Mapped["PlanUsuario | None"] = relationship(back_populates="usuario", uselist=False, cascade="all, delete-orphan")
+    # Avatar (nombre imaginario, hasta 10 caracteres): es el que se muestra en la barra y en el resto de la app. Tabla aparte, sin fila = no eligió uno.
+    avatar_registro: Mapped["AvatarUsuario | None"] = relationship(back_populates="usuario", uselist=False, cascade="all, delete-orphan")
 
 
 class PerfilInversorHistorial(BaseNoFinanciera):
@@ -131,3 +133,17 @@ class Notificacion(BaseNoFinanciera):
     clave: Mapped[str] = mapped_column(String(120))
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     leida_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AvatarUsuario(BaseNoFinanciera):
+    """Nombre que el usuario elige para mostrar en la barra de Rentafy y en el resto de la app ("avatar", un nombre imaginario): hasta
+    MAX_AVATAR caracteres. Sin fila, se muestra su nombre. Tabla propia (en vez de una columna de `usuarios`) por lo mismo que `PlanUsuario`:
+    no hay migraciones."""
+
+    __tablename__ = "avatares_usuario"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True)
+    avatar: Mapped[str] = mapped_column(String(10))
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="avatar_registro")
