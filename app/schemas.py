@@ -231,9 +231,20 @@ class UsuarioOut(BaseModel):
     perfilInversor: PerfilInversor
     plazoInversion: PlazoInversion
     esAdmin: bool = False
+    # Plan vigente ("casual" por defecto; los admin figuran como "pro"). Ver planes.py.
+    plan: Literal["casual", "pro"] = "casual"
     # False hasta que el usuario elige (o confirma) su perfil y su horizonte: el front le muestra el test de perfil
     # inversor la primera vez. Ver _perfil_configurado en routers/auth.py.
     perfilConfigurado: bool = False
+
+
+class PlanUpdate(BaseModel):
+    plan: Literal["casual", "pro"]
+
+
+class PlanCambiadoOut(UsuarioOut):
+    # Favoritos que se quitaron al pasar a Casual (se conservan los 5 más antiguos).
+    favoritosQuitados: int = 0
 
 
 class PerfilInversorUpdate(BaseModel):
@@ -358,6 +369,29 @@ class CurvaUnica(BaseModel):
     # inflación mensual. None si la fuente no respondió (el front cae a la mensualización del REM).
     inflacionMensualUltima: Optional[float] = None
     inflacionMensualMes: Optional[str] = None
+
+
+class NotificacionOut(BaseModel):
+    id: int
+    tipo: Literal["vencimiento", "pago", "variacion", "tir", "rendimiento", "score"]
+    ticker: str
+    titulo: str
+    mensaje: str
+    # Fecha del vencimiento o del pago, si el aviso es de ese tipo.
+    fechaEvento: Optional[date] = None
+    # Cuándo se generó, en UTC (con "Z"): el front la muestra en hora local.
+    creadaEn: str
+    leida: bool
+
+
+class NotificacionesPagina(BaseModel):
+    items: list[NotificacionOut]
+    total: int
+    noLeidas: int
+
+
+class ContadorNotificaciones(BaseModel):
+    noLeidas: int
 
 
 class PuntoRiesgoPais(BaseModel):

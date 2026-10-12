@@ -6,9 +6,9 @@ por eso no es una ForeignKey real ni tiene relationship(): se resuelve por coinc
 valor en la capa de aplicación (ver routers/watchlist.py), exactamente como la tesis resuelve
 la relación entre PERFIL_INVERSOR (no financiera) y PESO_PERFIL (financiera)."""
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import BaseNoFinanciera
@@ -32,6 +32,8 @@ class Usuario(BaseNoFinanciera):
         back_populates="usuario", cascade="all, delete-orphan"
     )
     favoritos: Mapped[list["Favorito"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+    # Plan Casual/Pro (ver PlanUsuario): sin fila = Casual. Tabla aparte a propósito, para no tener que migrar `usuarios`.
+    plan_registro: Mapped["PlanUsuario | None"] = relationship(back_populates="usuario", uselist=False, cascade="all, delete-orphan")
 
 
 class PerfilInversorHistorial(BaseNoFinanciera):
@@ -93,3 +95,39 @@ class CodigoEmail(BaseNoFinanciera):
     expira_en: Mapped[datetime] = mapped_column(DateTime)
     intentos: Mapped[int] = mapped_column(Integer, default=0)
     enviado_en: Mapped[datetime] = mapped_column(DateTime)
+
+
+class PlanUsuario(BaseNoFinanciera):
+    """Plan del usuario: `casual` o `pro`. Una fila por usuario; sin fila, el usuario es Casual. Es una tabla propia (en vez de una columna de
+    `usuarios`) porque el proyecto no tiene migraciones: `create_all` crea tablas nuevas pero no agrega columnas a las que ya existen."""
+
+    __tablename__ = "planes_usuario"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True)
+    plan: Mapped[str] = mapped_column(String(10), default="casual")
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="plan_registro")
+
+
+class Notificacion(BaseNoFinanciera):
+    """Aviso para un usuario Pro sobre uno de sus favoritos (vencimiento, pago próximo o alerta de rendimiento; ver notificaciones.py).
+    `clave` identifica el evento (ej. "venc:AL30D:2030-07-09:7") y, junto con el usuario, es única: así el job diario puede correr varias
+    veces sin duplicar avisos. `leida_en` vacío = no leída."""
+
+    __tablename__ = "notificaciones"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "clave", name="uq_notificacion_usuario_clave"),
+        Index("ix_notificaciones_usuario_leida_creada", "usuario_id", "leida_en", "creado_en"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"))
+    tipo: Mapped[str] = mapped_column(String(20))  # vencimiento | pago | variacion | tir | rendimiento | score
+    ticker: Mapped[str] = mapped_column(String(20))
+    titulo: Mapped[str] = mapped_column(String(160))
+    mensaje: Mapped[str] = mapped_column(Text, default="")
+    fecha_evento: Mapped[date | None] = mapped_column(Date, nullable=True)  # la del vencimiento o pago, si corresponde
+    clave: Mapped[str] = mapped_column(String(120))
+    creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    leida_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

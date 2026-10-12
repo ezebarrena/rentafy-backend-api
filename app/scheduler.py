@@ -23,10 +23,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .cauciones import importar_cauciones
-from .database import SessionFinanciera
+from .database import SessionFinanciera, SessionNoFinanciera
 from .feriados import es_dia_de_rueda
 from .financial_utils import actualizar_todo as actualizar_financial_utils
 from .ingest import importar
+from .notificaciones import generar as generar_notificaciones
 from .referencias import actualizar as actualizar_referencias
 from .tir_externo import completar_tir_faltante
 
@@ -113,6 +114,20 @@ def _actualizar_referencias() -> None:
         db.close()
 
 
+def _generar_notificaciones() -> None:
+    """Ver notificaciones.py: avisos de vencimientos, pagos y alertas de rendimiento para los favoritos de los usuarios Pro. Corre después de que el
+    backend importó el catálogo y las series de referencia (18:00-18:11) y de que el Servicio de IA calculó el Score (18:15-18:16)."""
+    db_fin, db_nofin = SessionFinanciera(), SessionNoFinanciera()
+    try:
+        logger.info("Notificaciones OK: %s", generar_notificaciones(db_fin, db_nofin))
+    except Exception as exc:  # noqa: BLE001 — se loguea, no debe tumbar el proceso
+        logger.warning("Generación de notificaciones falló: %s", exc)
+        db_nofin.rollback()
+    finally:
+        db_fin.close()
+        db_nofin.close()
+
+
 def _solo_en_dia_de_rueda(job: Callable[[], None]) -> Callable[[], None]:
     """Los jobs no corren sábados, domingos ni feriados nacionales (ver feriados.py): en un día sin rueda no hay cotización nueva y la
     corrida insertaría una fila con el precio viejo bajo la fecha del feriado. El chequeo está acá y no en el trigger porque APScheduler
@@ -174,6 +189,14 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=11, day_of_week="mon-fri"),
         id="actualizar_referencias_diario",
         name=f"Actualización diaria de series de referencia ({HORA_ACTUALIZACION}:11 ART)",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        _solo_en_dia_de_rueda(_generar_notificaciones),
+        trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=20, day_of_week="mon-fri"),
+        id="generar_notificaciones_diario",
+        name=f"Notificaciones de favoritos ({HORA_ACTUALIZACION}:20 ART)",
         replace_existing=True,
         misfire_grace_time=3600,
     )

@@ -11,7 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import referencias, rendimientos
-from ..deps import get_current_user, get_db_financiera
+from ..deps import get_db_financiera, require_pro
 from ..models_financiera import Cotizacion, FlujoFondo, Instrumento
 from ..models_no_financiera import Usuario
 
@@ -102,7 +102,7 @@ def rendimiento_por_tipo(ventana: str = Query("14d"), db: Session = Depends(get_
 @router.get("/watchlist/rendimiento")
 def rendimiento_favoritos(
     ventana: str = Query("1m"),
-    usuario: Usuario = Depends(get_current_user),
+    usuario: Usuario = Depends(require_pro),
     db: Session = Depends(get_db_financiera),
 ):
     """Cuánto habrían rendido, EN PESOS, los favoritos del usuario en la ventana (o desde que cada uno se agregó, con

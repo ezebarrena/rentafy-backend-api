@@ -22,6 +22,14 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 # Score) y sus endpoints. Sin la variable, nadie es admin.
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
 
+# Switch de prueba del plan (Casual/Pro) del menú de perfil: mientras no haya cobro, cualquier usuario puede cambiar su propio plan. Con
+# PLAN_SWITCH_HABILITADO=false el endpoint PUT /auth/me/plan responde 403 (para cuando se integre el pago).
+PLAN_SWITCH_HABILITADO = os.getenv("PLAN_SWITCH_HABILITADO", "true").strip().lower() not in ("0", "false", "no")
+
+# Plan de los usuarios que nunca eligieron uno (sin fila en `planes_usuario`: cuentas nuevas y existentes). Mientras no haya cobro todos arrancan Pro
+# y el switch del menú de perfil los pasa a Casual y de vuelta; cuando se cobre, se pone PLAN_POR_DEFECTO=casual. Cualquier otro valor cuenta como casual.
+PLAN_POR_DEFECTO = "pro" if os.getenv("PLAN_POR_DEFECTO", "pro").strip().lower() == "pro" else "casual"
+
 # rentafy-servicioIA corre en la MISMA máquina que este backend, tanto en desarrollo (tu compu)
 # como en producción (la EC2, ver rentafy-servicioIA/deploy/rentafy-servicioia.service: escucha
 # en 127.0.0.1, nunca expuesto a internet a propósito) — "localhost" acá siempre significa "este

@@ -12,15 +12,12 @@ from sqlalchemy.orm import Session
 from ..deps import get_current_user, get_db_financiera, get_db_no_financiera
 from ..models_financiera import Instrumento
 from ..models_no_financiera import Favorito, Usuario
+from ..planes import NOMBRE_PLAN, PLAN_CASUAL, limite_favoritos, plan_de
 from ..schemas import InstrumentoListItem, PerfilInversor, PlazoInversion
 from ..scoring import pesos_vigentes
 from ..serializers import to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
-
-# Tope de favoritos por usuario. Se valida acá (no solo en el front) para que ningún cliente pueda saltearlo; el front lo
-# replica (AppContext.tsx:MAX_FAVORITOS) para avisar antes de pegarle a la API.
-MAX_FAVORITOS = 20
 
 
 @router.get("", response_model=list[InstrumentoListItem])
@@ -68,8 +65,14 @@ def agregar_a_watchlist(
     ).first()
     if ya_existe is None:
         cantidad = db_no_financiera.query(Favorito).filter(Favorito.usuario_id == usuario.id).count()
-        if cantidad >= MAX_FAVORITOS:
-            raise HTTPException(409, f"Llegaste al máximo de {MAX_FAVORITOS} favoritos: quitá alguno para sumar otro.")
+        limite = limite_favoritos(usuario)
+        if cantidad >= limite:
+            # Tope por plan (Casual 5, Pro 30). Se valida acá y no solo en el front para que ningún cliente pueda saltearlo.
+            plan = plan_de(usuario)
+            sugerencia = " o pasate a Pro para llegar a 30" if plan == PLAN_CASUAL else ""
+            raise HTTPException(
+                409, f"Llegaste al máximo de {limite} favoritos del plan {NOMBRE_PLAN[plan]}: quitá alguno{sugerencia} para sumar otro."
+            )
         db_no_financiera.add(Favorito(usuario_id=usuario.id, instrumento_ticker=ticker))
         db_no_financiera.commit()
 

@@ -1,6 +1,7 @@
 """RF-01 a RF-06: registro, login, edición de datos personales y perfil inversor."""
 
 import secrets
+from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from google.auth.transport import requests as google_requests
@@ -8,9 +9,10 @@ from google.oauth2 import id_token as google_id_token
 from sqlalchemy.orm import Session
 
 from .. import codigos, email_templates, emailing
-from ..config import GOOGLE_CLIENT_ID
+from ..config import GOOGLE_CLIENT_ID, PLAN_SWITCH_HABILITADO
 from ..deps import es_admin, get_current_user, get_db_no_financiera
-from ..models_no_financiera import PerfilInversorHistorial, PlazoInversionHistorial, Usuario
+from ..models_no_financiera import PerfilInversorHistorial, PlanUsuario, PlazoInversionHistorial, Usuario
+from ..planes import LIMITE_FAVORITOS, PLAN_CASUAL, plan_de
 from ..schemas import (
     CambiarPasswordIn,
     EmailIn,
@@ -19,6 +21,8 @@ from ..schemas import (
     VerificarEmailIn,
     GoogleLogin,
     PerfilInversorUpdate,
+    PlanCambiadoOut,
+    PlanUpdate,
     PlazoInversionUpdate,
     TokenOut,
     UsuarioLogin,
@@ -79,6 +83,7 @@ def _to_out(usuario: Usuario) -> UsuarioOut:
         perfilInversor=_perfil_vigente(usuario),
         plazoInversion=_plazo_vigente(usuario),
         esAdmin=es_admin(usuario),
+        plan=plan_de(usuario),
         perfilConfigurado=_perfil_configurado(usuario),
     )
 
@@ -253,6 +258,31 @@ def actualizar_perfil_inversor(
     db.commit()
     db.refresh(usuario)
     return _to_out(usuario)
+
+
+@router.put("/me/plan", response_model=PlanCambiadoOut)
+def actualizar_plan(
+    datos: PlanUpdate, usuario: Usuario = Depends(get_current_user), db: Session = Depends(get_db_no_financiera)
+):
+    """Switch de prueba Casual/Pro (todavía no hay cobro; se apaga con PLAN_SWITCH_HABILITADO=false). Al pasar a Casual, los favoritos que superen
+    el tope del plan se borran: se conservan los más antiguos. Vale para todos, también para los admin (tienen plan como cualquiera y pueden cambiarlo)."""
+    if not PLAN_SWITCH_HABILITADO:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "El cambio de plan no está habilitado")
+    registro = usuario.plan_registro
+    if registro is None:
+        db.add(PlanUsuario(usuario_id=usuario.id, plan=datos.plan))
+    else:
+        registro.plan = datos.plan
+        registro.actualizado_en = datetime.utcnow()
+    quitados = 0
+    if datos.plan == PLAN_CASUAL:
+        ordenados = sorted(usuario.favoritos, key=lambda f: (f.creado_en, f.id))
+        for sobrante in ordenados[LIMITE_FAVORITOS[PLAN_CASUAL]:]:
+            db.delete(sobrante)
+            quitados += 1
+    db.commit()
+    db.refresh(usuario)
+    return PlanCambiadoOut(**_to_out(usuario).model_dump(), favoritosQuitados=quitados)
 
 
 @router.put("/me/plazo-inversion", response_model=UsuarioOut)

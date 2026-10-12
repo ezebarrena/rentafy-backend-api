@@ -59,6 +59,20 @@ def require_admin(usuario: Usuario = Depends(get_current_user)) -> Usuario:
     return usuario
 
 
+# Detalle del 403 de los endpoints solo Pro: el front lo reconoce por este valor y muestra la invitación a pasarse a Pro.
+PLAN_PRO_REQUERIDO = "PLAN_PRO_REQUERIDO"
+
+
+def require_pro(usuario: Usuario = Depends(get_current_user)) -> Usuario:
+    """Solo plan Pro (los admin también tienen que serlo: pueden cambiar de plan con el switch del menú). 401 si no hay sesión, 403 `PLAN_PRO_REQUERIDO` si hay sesión pero el plan es Casual: ocultar la
+    pantalla en el front no alcanza, los datos se piden directo a la API."""
+    from .planes import PLAN_PRO, plan_de  # import acá: planes.py importa de este módulo
+
+    if plan_de(usuario) != PLAN_PRO:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, PLAN_PRO_REQUERIDO)
+    return usuario
+
+
 def solicitante_es_admin(
     token: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db_no_financiera)
 ) -> bool:

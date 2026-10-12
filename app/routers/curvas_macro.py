@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import curvas_macro
 from ..deps import get_db_financiera
+from ..deps import require_pro
 from ..financial_utils import NOMBRE_REM_INFLACION
 from ..models_financiera import Cotizacion, IndicadorMacro, Instrumento, SerieReferencia
 from ..schemas import (
@@ -27,7 +28,7 @@ from ..schemas import (
 from ..serializers import ultimas_cotizaciones
 from .instrumentos import _ajustar_curva, _puntos_curva_unica, _ultima_inflacion_mensual
 
-router = APIRouter(prefix="/curvas-macro", tags=["curvas-macro"])
+router = APIRouter(prefix="/curvas-macro", tags=["curvas-macro"], dependencies=[Depends(require_pro)])
 
 DOLAR_EQUILIBRIO_PLAZO_MAX_DIAS = 5 * 365
 
