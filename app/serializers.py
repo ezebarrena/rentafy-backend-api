@@ -26,10 +26,10 @@ from .schemas import (
 from .scoring import compute_score
 
 # (días, para no repetir el número mágico en la query y en el schema de respuesta). Ver análisis
-# de factibilidad: 7/30 tienen cobertura real hoy en casi todo el catálogo; 180/365 se van
+# de factibilidad: 7/14/30/90 tienen cobertura real hoy en casi todo el catálogo; 180/365 se van
 # llenando solos con el tiempo (la mayoría del catálogo todavía no acumula esa antigüedad de
 # ingesta diaria real) — se devuelven igual, con `variacion=None`, en vez de omitirse.
-DIAS_VARIACION_PERIODO = (7, 30, 180, 365)
+DIAS_VARIACION_PERIODO = (7, 14, 30, 90, 180, 365)
 
 
 def _variaciones_periodo(

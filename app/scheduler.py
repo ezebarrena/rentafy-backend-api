@@ -12,14 +12,19 @@ El endpoint manual (POST /mercado/importar/compararfondos) sigue existiendo sin 
 para poder disparar una actualización ad-hoc sin esperar al horario programado.
 """
 
+import functools
 import logging
 import time
+from collections.abc import Callable
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .cauciones import importar_cauciones
 from .database import SessionFinanciera
+from .feriados import es_dia_de_rueda
 from .financial_utils import actualizar_todo as actualizar_financial_utils
 from .ingest import importar
 from .referencias import actualizar as actualizar_referencias
@@ -103,10 +108,26 @@ def _actualizar_referencias() -> None:
         db.close()
 
 
+def _solo_en_dia_de_rueda(job: Callable[[], None]) -> Callable[[], None]:
+    """Los jobs no corren sábados, domingos ni feriados nacionales (ver feriados.py): en un día sin rueda no hay cotización nueva y la
+    corrida insertaría una fila con el precio viejo bajo la fecha del feriado. El chequeo está acá y no en el trigger porque APScheduler
+    no conoce el calendario de feriados; el endpoint manual de importación llama a la función sin esto."""
+
+    @functools.wraps(job)
+    def envoltura() -> None:
+        hoy = datetime.now(ZoneInfo(ZONA_HORARIA_MERCADO)).date()
+        if not es_dia_de_rueda(hoy):
+            logger.info("«%s» no corre: %s es feriado o fin de semana.", job.__name__, hoy)
+            return
+        job()
+
+    return envoltura
+
+
 def iniciar_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=ZONA_HORARIA_MERCADO)
     scheduler.add_job(
-        _actualizar_catalogo,
+        _solo_en_dia_de_rueda(_actualizar_catalogo),
         # day_of_week="mon-fri": el mercado argentino no opera fines de semana, así que no hay
         # cotización nueva que traer — sin esto el job corría también sábado y domingo,
         # insertando una fila con el precio (stale) del viernes bajo la fecha del fin de semana.
@@ -117,7 +138,7 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=3600,  # si el proceso estaba caído a las 18:00, la corre al levantar
     )
     scheduler.add_job(
-        _actualizar_financial_utils,
+        _solo_en_dia_de_rueda(_actualizar_financial_utils),
         trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=5, day_of_week="mon-fri"),
         id="financial_utils_diario",
         name="Actualización diaria de financial_utils (REM BCRA, Riesgo País, Dólar CCL/MEP)",
@@ -125,7 +146,7 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=3600,
     )
     scheduler.add_job(
-        _completar_tir_faltante,
+        _solo_en_dia_de_rueda(_completar_tir_faltante),
         # minute=7: después de _actualizar_catalogo (18:00) y _actualizar_financial_utils
         # (18:05), antes de que rentafy-servicioIA arranque su cadena a las 18:10 (Entrenamiento
         # → Motor de Scoring, ver scheduler.py de ese repo).
@@ -136,7 +157,7 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=3600,
     )
     scheduler.add_job(
-        _actualizar_cauciones,
+        _solo_en_dia_de_rueda(_actualizar_cauciones),
         trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=9, day_of_week="mon-fri"),
         id="actualizar_cauciones_diario",
         name=f"Actualización diaria de cauciones ({HORA_ACTUALIZACION}:09 ART)",
@@ -144,7 +165,7 @@ def iniciar_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=3600,
     )
     scheduler.add_job(
-        _actualizar_referencias,
+        _solo_en_dia_de_rueda(_actualizar_referencias),
         trigger=CronTrigger(hour=HORA_ACTUALIZACION, minute=11, day_of_week="mon-fri"),
         id="actualizar_referencias_diario",
         name=f"Actualización diaria de series de referencia ({HORA_ACTUALIZACION}:11 ART)",

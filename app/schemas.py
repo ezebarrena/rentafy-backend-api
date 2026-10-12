@@ -85,7 +85,7 @@ class InstrumentoOut(BaseModel):
     score: Optional[float] = Field(default=None, description="Score ya ponderado según el perfil solicitado")
     variacionesPeriodo: list[VariacionPeriodo] = Field(
         default_factory=list,
-        description="Variación de precio a 7/30/180/365 días — solo en el detalle, no en los listados.",
+        description="Variación de precio a 7/14/30/90/180/365 días — solo en el detalle, no en los listados.",
     )
 
 

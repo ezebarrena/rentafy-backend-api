@@ -18,6 +18,10 @@ from ..serializers import to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
+# Tope de favoritos por usuario. Se valida acá (no solo en el front) para que ningún cliente pueda saltearlo; el front lo
+# replica (AppContext.tsx:MAX_FAVORITOS) para avisar antes de pegarle a la API.
+MAX_FAVORITOS = 20
+
 
 @router.get("", response_model=list[InstrumentoListItem])
 def obtener_watchlist(
@@ -63,6 +67,9 @@ def agregar_a_watchlist(
         Favorito.usuario_id == usuario.id, Favorito.instrumento_ticker == ticker
     ).first()
     if ya_existe is None:
+        cantidad = db_no_financiera.query(Favorito).filter(Favorito.usuario_id == usuario.id).count()
+        if cantidad >= MAX_FAVORITOS:
+            raise HTTPException(409, f"Llegaste al máximo de {MAX_FAVORITOS} favoritos: quitá alguno para sumar otro.")
         db_no_financiera.add(Favorito(usuario_id=usuario.id, instrumento_ticker=ticker))
         db_no_financiera.commit()
 
