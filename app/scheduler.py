@@ -46,6 +46,11 @@ def _actualizar_catalogo() -> None:
         try:
             resultado = importar(db)
             logger.info("Actualización diaria de compararfondos.com.ar OK: %s", resultado)
+            # La TIR de TAMAR/DUAL/dólar linked solo la trae el relleno externo (ver tir_externo.py), que necesita las cotizaciones de hoy ya
+            # cargadas. Antes dependía solo del horario de las 18:07: si el import se demoraba, o la máquina arrancaba tarde y los dos jobs se
+            # disparaban a la vez, el relleno corría sin filas que completar y ese día quedaba sin TIR. Encadenarlo acá lo deja siempre
+            # después del import; el job de las 18:07 queda como red de seguridad (solo completa lo que siga vacío).
+            _completar_tir_faltante()
             return
         except Exception as exc:  # noqa: BLE001 — se loguea y se reintenta, no debe tumbar el proceso
             logger.warning("Intento %s/%s de actualización diaria falló: %s", intento, MAX_REINTENTOS, exc)

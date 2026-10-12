@@ -324,3 +324,37 @@ class CurvaRendimiento(BaseModel):
     # CURVA_DURATION_MINIMA) — se muestran igual, aparte, para que quede claro que no es que
     # falten datos: es que ese tramo es demasiado ruidoso para curvear.
     excluidos: list[PuntoCurva] = []
+
+
+FamiliaCurvaUnica = Literal["fija", "cer", "tamar", "dolar_linked", "soberano", "on"]
+BaseTirCurvaUnica = Literal["nominal", "real", "usd"]
+
+
+class PuntoCurvaUnica(BaseModel):
+    """Un instrumento para la "Curva única" (en pesos o en dólares). `tir` es la TIR tal cual la publica la fuente, en % anual efectivo, y
+    `baseTir` dice en qué unidad está: `nominal` (en la moneda del instrumento, lista para graficar), `real` (BONCER: tasa real sobre
+    CER) o `usd` (dólar linked: tasa sobre el dólar). En pesos, el front pasa las dos últimas a pesos nominales con el escenario elegido
+    (ver curvaUnica.ts)."""
+
+    ticker: str
+    nombre: str
+    familia: FamiliaCurvaUnica
+    subtipo: Optional[str] = None
+    plazoDias: int
+    tir: float
+    baseTir: BaseTirCurvaUnica
+
+
+class CurvaUnica(BaseModel):
+    instrumentos: list[PuntoCurvaUnica]
+    # Rango de plazo (en días) con el que se armó la lista: más corto es ruido y más largo estira el eje.
+    plazoMinDias: int
+    plazoMaxDias: int
+    # Inflación esperada a 12 meses (REM, BCRA), en % anual, y el día en que se guardó: de ahí sale el escenario por defecto de la curva en
+    # pesos. None si todavía no hay dato.
+    inflacionEsperadaAnual: Optional[float] = None
+    inflacionEsperadaFecha: Optional[date] = None
+    # Último dato mensual de inflación (IPC, ArgentinaDatos, el mismo del Dashboard) y su mes ("sep. 2026"): es el escenario por defecto de la
+    # inflación mensual. None si la fuente no respondió (el front cae a la mensualización del REM).
+    inflacionMensualUltima: Optional[float] = None
+    inflacionMensualMes: Optional[str] = None

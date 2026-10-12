@@ -3,6 +3,7 @@ detalle de instrumentos. Espeja rentafy-frontend/src/data/filters.ts y sort.ts."
 
 import math
 import statistics
+import time
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Literal, Optional
@@ -11,11 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..financial_utils import obtener_rem_inflacion
+from ..financial_utils import NOMBRE_REM_INFLACION, obtener_rem_inflacion
 from ..deps import get_db_financiera
-from ..models_financiera import Caucion, Cotizacion, Instrumento, Scoring
+from ..models_financiera import Caucion, Cotizacion, IndicadorMacro, Instrumento, Scoring
 from ..schemas import (
     CurvaRendimiento,
+    CurvaUnica,
     InstrumentoConsistente,
     InstrumentoEnAlza,
     InstrumentoListItem,
@@ -25,10 +27,12 @@ from ..schemas import (
     PerfilInversor,
     PlazoInversion,
     PuntoCurva,
+    PuntoCurvaUnica,
     PuntoHistorico,
     PuntoScore,
 )
 from ..scoring import compute_score, pesos_vigentes
+from .mercado import _inflacion_mensual
 from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 DIAS_SCORING_HISTORICO = 20
@@ -412,6 +416,91 @@ def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
         resultado.append(curva_cauciones)
     resultado.sort(key=lambda c: _curva_orden_key(c.label))
     return resultado
+
+
+# "Curva única" (en pesos o en dólares): los instrumentos de una moneda, de todos los tipos, en un solo gráfico. Cada uno entra con la TIR que
+# publica la fuente y la unidad de esa TIR (ver PuntoCurvaUnica); el escenario de la curva en pesos (inflación, depreciación) lo aplica el front.
+CURVA_UNICA_PLAZO_MIN_DIAS = 10  # más cerca del vencimiento la TIR anualizada es puro ruido
+# Plazo máximo: prácticamente sin tope (el más largo del catálogo ronda los 20 años). Qué tramo se ve lo elige el usuario con el filtro de
+# plazo del front (por defecto 5 años en pesos y 10 en dólares, para que un bono larguísimo no estire el eje y aplaste al resto).
+CURVA_UNICA_PLAZO_MAX_DIAS = {"ARS": 30 * 365, "USD": 30 * 365}
+_FAMILIA_CURVA_UNICA: dict[tuple[str, Optional[str], str], tuple[str, str]] = {
+    ("LECAP", None, "ARS"): ("fija", "nominal"),
+    ("BONCAP", None, "ARS"): ("fija", "nominal"),
+    ("BONO", "Bono ARS", "ARS"): ("fija", "nominal"),
+    ("BONO", "BONCER", "ARS"): ("cer", "real"),
+    ("BONO", "TAMAR", "ARS"): ("tamar", "nominal"),
+    ("BONO", "DUAL", "ARS"): ("tamar", "nominal"),
+    ("BONO", "Dólar Linked", "ARS"): ("dolar_linked", "usd"),
+    ("BONO", "Bono USD", "USD"): ("soberano", "nominal"),
+    ("ON", None, "USD"): ("on", "nominal"),
+}
+
+
+def _puntos_curva_unica(
+    instrumentos: list[Instrumento], cotizaciones: dict[str, Cotizacion], moneda: str
+) -> list[PuntoCurvaUnica]:
+    plazo_max = CURVA_UNICA_PLAZO_MAX_DIAS[moneda]
+    puntos = []
+    for inst in instrumentos:
+        clasificacion = _FAMILIA_CURVA_UNICA.get((inst.tipo, inst.subtipo, inst.moneda))
+        cot = cotizaciones.get(inst.ticker)
+        if inst.moneda != moneda or clasificacion is None or cot is None or cot.tir is None or cot.precio_stale:
+            continue
+        plazo = (inst.vencimiento - cot.fecha).days
+        if not CURVA_UNICA_PLAZO_MIN_DIAS <= plazo <= plazo_max:
+            continue
+        familia, base = clasificacion
+        puntos.append(
+            PuntoCurvaUnica(
+                ticker=inst.ticker,
+                nombre=inst.nombre,
+                familia=familia,
+                subtipo=inst.subtipo,
+                plazoDias=plazo,
+                tir=round(cot.tir, 2),
+                baseTir=base,
+            )
+        )
+    puntos.sort(key=lambda p: p.plazoDias)
+    return puntos
+
+
+_IPC_CACHE_SEG = 3600
+_ipc_cache: dict = {"hasta": 0.0, "dato": None}
+
+
+def _ultima_inflacion_mensual() -> Optional[dict]:
+    """Último IPC mensual publicado (el mismo dato del Dashboard), con un caché de una hora: el dato cambia una vez por mes y no vale una
+    llamada externa por cada visita a la pestaña. Si la fuente falla devuelve lo último que se tuvo, o None."""
+    ahora = time.monotonic()
+    if ahora >= _ipc_cache["hasta"]:
+        try:
+            _ipc_cache["dato"] = _inflacion_mensual()
+            _ipc_cache["hasta"] = ahora + _IPC_CACHE_SEG
+        except Exception:  # noqa: BLE001 — fuente externa: se sigue sin el dato, no se rompe la curva
+            _ipc_cache["hasta"] = ahora + 300
+    return _ipc_cache["dato"]
+
+
+@router.get("/curva-unica", response_model=CurvaUnica)
+def curva_unica(moneda: Literal["ARS", "USD"] = "ARS", db: Session = Depends(get_db_financiera)):
+    """Datos de la "Curva única en pesos / en dólares" (pestaña Rendimientos): todos los instrumentos de la moneda con TIR, de cualquier tipo,
+    en un solo conjunto. No ajusta ninguna curva ni aplica escenario: eso lo hace el front para que mover los controles sea instantáneo.
+    No toca /curvas."""
+    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True), Instrumento.moneda == moneda).all()
+    cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
+    rem = db.query(IndicadorMacro).filter(IndicadorMacro.nombre == NOMBRE_REM_INFLACION).first()
+    ipc = _ultima_inflacion_mensual() if moneda == "ARS" else None  # en dólares no hay escenario: no se pide
+    return CurvaUnica(
+        instrumentos=_puntos_curva_unica(instrumentos, cotizaciones, moneda),
+        plazoMinDias=CURVA_UNICA_PLAZO_MIN_DIAS,
+        plazoMaxDias=CURVA_UNICA_PLAZO_MAX_DIAS[moneda],
+        inflacionEsperadaAnual=rem.valor if rem else None,
+        inflacionEsperadaFecha=rem.fecha if rem else None,
+        inflacionMensualUltima=ipc["valor"] if ipc else None,
+        inflacionMensualMes=ipc["mes_label"] if ipc else None,
+    )
 
 
 def _historial_scoring_reciente(db: Session, dias: int) -> dict[str, list]:

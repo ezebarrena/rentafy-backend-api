@@ -10,6 +10,8 @@ que una devuelva un valor — agregar una segunda fuente el día de mañana es e
 con esa misma firma y sumarla a la lista, nada más (no hace falta ningún registro ni config
 nueva). No están "priorizadas" por calidad todavía porque hoy solo hay una.
 
+Si la fuente externa tampoco responde para un ticker, se arrastra su última TIR conocida de los últimos días (ver `completar_tir_faltante`).
+
 Nunca pisa una TIR que ya vino de la fuente propia (ver `completar_tir_faltante`, filtra
 `Cotizacion.tir.is_(None)`) — esto es estrictamente un relleno de huecos, no una fuente de
 verdad alternativa para lo que compararfondos.com.ar ya reporta.
@@ -18,7 +20,8 @@ verdad alternativa para lo que compararfondos.com.ar ya reporta.
 import json
 import logging
 import re
-from datetime import date
+import time
+from datetime import date, timedelta
 
 import requests
 from sqlalchemy.orm import Session
@@ -73,12 +76,41 @@ def _obtener_tir_bonistas(ticker: str) -> float | None:
 FUENTES = [_obtener_tir_bonistas]
 
 
+INTENTOS_POR_TICKER = 2
+ESPERA_ENTRE_INTENTOS_SEG = 1.0
+# Si ni así hay TIR, se arrastra la última conocida de hasta estos días atrás (ver `completar_tir_faltante`).
+DIAS_ARRASTRE_TIR = 7
+
+
 def obtener_tir_externo(ticker: str) -> float | None:
-    for fuente in FUENTES:
-        tir = fuente(ticker)
-        if tir is not None:
-            return tir
+    """Prueba cada fuente, y la ronda entera hasta INTENTOS_POR_TICKER veces: bonistas.com falla de forma intermitente (timeouts, la página
+    cambia un día) y un solo tropiezo dejaba al instrumento sin TIR toda esa jornada."""
+    for intento in range(INTENTOS_POR_TICKER):
+        for fuente in FUENTES:
+            tir = fuente(ticker)
+            if tir is not None:
+                return tir
+        if intento < INTENTOS_POR_TICKER - 1:
+            time.sleep(ESPERA_ENTRE_INTENTOS_SEG)
     return None
+
+
+def _ultima_tir_conocida(db: Session, tickers: list[str], hoy: date) -> dict[str, float]:
+    """Última TIR no nula de cada ticker en los DIAS_ARRASTRE_TIR días anteriores a `hoy`."""
+    if not tickers:
+        return {}
+    filas = (
+        db.query(Cotizacion.instrumento_ticker, Cotizacion.tir)
+        .filter(
+            Cotizacion.instrumento_ticker.in_(tickers),
+            Cotizacion.tir.is_not(None),
+            Cotizacion.fecha < hoy,
+            Cotizacion.fecha >= hoy - timedelta(days=DIAS_ARRASTRE_TIR),
+        )
+        .order_by(Cotizacion.fecha.asc())
+        .all()
+    )
+    return {ticker: tir for ticker, tir in filas}  # la última fecha pisa a las anteriores
 
 
 def completar_tir_faltante(db: Session) -> dict:
@@ -95,11 +127,31 @@ def completar_tir_faltante(db: Session) -> dict:
     )
 
     completados = 0
+    sin_tir = []
     for fila in filas:
         tir = obtener_tir_externo(fila.instrumento_ticker)
         if tir is not None:
             fila.tir = tir
             completados += 1
+        else:
+            sin_tir.append(fila)
+
+    # La fuente externa es la ÚNICA que informa la TIR de TAMAR, DUAL y dólar linked (compararfondos nunca la trae), así que si falla un día
+    # el Score de ese día pasaba de una TIR real a "sin TIR" y el Rendimiento daba un salto enorme (caso real: TXMD9, 87,5 → 47,4). La TIR de
+    # estos instrumentos se mueve despacio: se arrastra la última conocida de hasta DIAS_ARRASTRE_TIR días atrás. Si pasó más tiempo, queda vacía.
+    arrastrados = 0
+    ultimas = _ultima_tir_conocida(db, [f.instrumento_ticker for f in sin_tir], hoy)
+    for fila in sin_tir:
+        tir = ultimas.get(fila.instrumento_ticker)
+        if tir is not None:
+            fila.tir = tir
+            arrastrados += 1
+            logger.info("TIR de %s: la fuente no respondió, se arrastra la última conocida (%s%%)", fila.instrumento_ticker, tir)
 
     db.commit()
-    return {"procesados": len(filas), "completados": completados, "sinFuente": len(filas) - completados}
+    return {
+        "procesados": len(filas),
+        "completados": completados,
+        "arrastrados": arrastrados,
+        "sinFuente": len(filas) - completados - arrastrados,
+    }
