@@ -17,13 +17,15 @@ from .schemas import (
     FlujoFondo,
     InstrumentoListItem,
     InstrumentoOut,
+    LecturaPerfil,
     NivelRiesgo,
     PerfilInversor,
     PesosPerfil,
     PlazoInversion,
     VariacionPeriodo,
 )
-from .scoring import compute_score
+from .lectura_perfil import armar_lectura
+from .scoring import ajuste_para, compute_score, score_base
 
 # (días, para no repetir el número mágico en la query y en el schema de respuesta). Ver análisis
 # de factibilidad: 7/14/30/90 tienen cobertura real hoy en casi todo el catálogo; 180/365 se van
@@ -119,10 +121,30 @@ def _score(
     perfil: PerfilInversor,
     plazo: PlazoInversion = "mediano",
     pesos_base: dict[PerfilInversor, PesosPerfil] | None = None,
+    instrumento: Instrumento | None = None,
 ) -> float | None:
     if sc is None:
         return None
-    return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo, pesos_base)
+    ajuste = ajuste_para(instrumento, sc.fecha_calculo, perfil, plazo)
+    return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo, pesos_base, ajuste)
+
+
+def _lectura_perfil(
+    sc,
+    instrumento: Instrumento,
+    perfil: PerfilInversor,
+    plazo: PlazoInversion,
+    pesos_base: dict[PerfilInversor, PesosPerfil] | None,
+) -> LecturaPerfil | None:
+    """Texto y veredicto para el perfil y el horizonte pedidos (ver lectura_perfil.py). None sin Scoring o con el Score sin calcular."""
+    if sc is None:
+        return None
+    base = score_base(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo, pesos_base)
+    if base is None:
+        return None
+    ajuste = ajuste_para(instrumento, sc.fecha_calculo, perfil, plazo)
+    factores = {"rendimiento": sc.rendimiento, "riesgo": sc.riesgo, "liquidez": sc.liquidez, "estabilidad": sc.estabilidad}
+    return armar_lectura(base, ajuste, factores, perfil, plazo)
 
 
 def to_list_item(
@@ -159,7 +181,7 @@ def to_list_item(
         riesgo=_riesgo_bucket(sc.riesgo) if sc is not None else instrumento.riesgo,
         liquidez=instrumento.liquidez,
         resumen=instrumento.resumen,
-        score=_score(sc, perfil, plazo, pesos_base),
+        score=_score(sc, perfil, plazo, pesos_base, instrumento),
     )
 
 
@@ -226,6 +248,7 @@ def to_detail(
         ),
         flujos=[FlujoFondo(fecha=f.fecha, tipo=f.tipo, importe=f.importe) for f in instrumento.flujos],
         resumen=instrumento.resumen,
-        score=_score(sc, perfil, plazo, pesos_base),
+        score=_score(sc, perfil, plazo, pesos_base, instrumento),
+        lecturaPerfil=_lectura_perfil(sc, instrumento, perfil, plazo, pesos_base),
         variacionesPeriodo=_variaciones_periodo(instrumento.cotizaciones, cot.precio, date.today()),
     )

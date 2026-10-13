@@ -58,3 +58,7 @@ RATE_LIMIT_GENERAL = int(os.getenv("RATE_LIMIT_GENERAL", "300"))  # solicitudes 
 RATE_LIMIT_ACCESO = int(os.getenv("RATE_LIMIT_ACCESO", "10"))  # solicitudes por IP y ventana a login/registro/códigos
 # Solo para pruebas locales: limitar también las solicitudes que llegan por loopback sin cabecera de proxy (en producción nginx las trae).
 RATE_LIMIT_LOOPBACK = os.getenv("RATE_LIMIT_LOOPBACK", "0") == "1"
+
+# Ajuste del Score por horizonte (afinidad perfil-tipo de activo y calce de plazo, ver scoring.py:ajuste_horizonte). SCORE_AJUSTE_HORIZONTE=0 lo apaga y
+# el Score vuelve a ser solo la ponderación de los cuatro factores (la base no cambia: el Score se compone al pedirlo).
+SCORE_AJUSTE_HORIZONTE = os.getenv("SCORE_AJUSTE_HORIZONTE", "1").strip().lower() not in ("0", "false", "no")

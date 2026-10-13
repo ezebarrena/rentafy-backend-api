@@ -31,7 +31,7 @@ from ..schemas import (
     PuntoHistorico,
     PuntoScore,
 )
-from ..scoring import compute_score, pesos_vigentes
+from ..scoring import ajuste_para, compute_score, pesos_vigentes
 from .mercado import _inflacion_mensual
 from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
@@ -609,7 +609,7 @@ def instrumentos_consistentes(
         scores = [
             s
             for f in filas_ticker
-            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base))
+            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base, ajuste_para(instrumento, f.fecha_calculo, perfil, plazo)))
             is not None
         ]
         if len(scores) < CONSISTENCIA_MINIMO_DIAS:
@@ -665,7 +665,7 @@ def instrumentos_en_alza(
         scores = [
             s
             for f in filas_ticker
-            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base))
+            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base, ajuste_para(instrumento, f.fecha_calculo, perfil, plazo)))
             is not None
         ]
         if len(scores) < CONSISTENCIA_MINIMO_DIAS:
@@ -795,8 +795,10 @@ def scoring_historico(
     # docstring) — se omite ese punto del gráfico en vez de romper PuntoScore.score (int, no
     # nullable): un hueco puntual en la serie es preferible a inventar un valor o tumbar el
     # endpoint.
+    instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker.upper()).first()
+    # El ajuste por horizonte usa los años que faltaban para el vencimiento EN CADA FECHA (no hoy): la serie histórica queda consistente con el Score vigente.
     puntos = [
-        (f.fecha_calculo, compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base))
+        (f.fecha_calculo, compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base, ajuste_para(instrumento, f.fecha_calculo, perfil, plazo)))
         for f in filas
     ]
     return [PuntoScore(fecha=fecha, score=score) for fecha, score in puntos if score is not None]

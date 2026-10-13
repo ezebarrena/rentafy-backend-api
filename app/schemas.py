@@ -33,6 +33,17 @@ class FactoresScore(BaseModel):
     modeloId: str
 
 
+class LecturaPerfil(BaseModel):
+    """Lectura del instrumento para el perfil y el horizonte del solicitante (ver lectura_perfil.py): el veredicto sale del MISMO cálculo
+    que el Score, así que el número y el texto no se contradicen. No es asesoramiento financiero."""
+
+    veredicto: Literal["recomendable", "con_reservas", "no_recomendable"]
+    titulo: str
+    razones: list[str]
+    scoreBase: int = Field(description="Score solo con la ponderación de los cuatro factores, antes del ajuste por horizonte")
+    ajuste: int = Field(description="Puntos que sumó (+) o restó (−) el ajuste por horizonte: afinidad con el perfil y calce de plazo")
+
+
 class FlujoFondo(BaseModel):
     fecha: date
     tipo: str
@@ -85,6 +96,7 @@ class InstrumentoOut(BaseModel):
     flujos: list[FlujoFondo]
     resumen: str = ""
     score: Optional[float] = Field(default=None, description="Score ya ponderado según el perfil solicitado")
+    lecturaPerfil: Optional[LecturaPerfil] = Field(default=None, description="Texto y veredicto para el perfil y el horizonte solicitados; None sin Scoring")
     variacionesPeriodo: list[VariacionPeriodo] = Field(
         default_factory=list,
         description="Variación de precio a 7/14/30/90/180/365 días — solo en el detalle, no en los listados.",
