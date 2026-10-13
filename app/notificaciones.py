@@ -1,4 +1,5 @@
-"""Notificaciones para los usuarios Pro sobre sus favoritos: vencimientos y pagos próximos, y alertas de rendimiento.
+"""Notificaciones para los usuarios Pro: avisos sobre sus favoritos (vencimientos y pagos próximos, alertas de rendimiento) y activos destacados
+que todavía no siguen.
 
 Las reglas son funciones puras (reciben datos, devuelven avisos) para poder probarlas aisladas; `generar` las aplica a los favoritos de cada usuario
 Pro y guarda lo nuevo. Cada aviso lleva una `clave` que identifica el evento (ej. "venc:AL30D:2030-07-09:7"): junto con el usuario es única en la base,
@@ -35,7 +36,16 @@ DIAS_COMPARACION = 7
 VENTANA_RENDIMIENTO_DIAS = 30
 UMBRAL_VS_INFLACION = 0.02  # 2 puntos porcentuales por encima o por debajo de la inflación del mes
 
-TIPOS = ("vencimiento", "pago", "variacion", "tir", "rendimiento", "score")
+# Activos destacados (descubrimiento): un instrumento que el usuario NO tiene en favoritos y que viene rindiendo claramente por encima de la inflación,
+# con un Score alto según su perfil. Pocos por corrida y a lo sumo uno por instrumento y mes, para que sea un aviso y no ruido.
+UMBRAL_DESTACADO_SOBRE_INFLACION = 0.03  # 3 puntos porcentuales por encima de la inflación del mes
+SCORE_MINIMO_DESTACADO = 70  # el rendimiento solo no alcanza: tiene que ser un buen Score para el perfil del usuario
+DIAS_MINIMOS_AL_VENCIMIENTO_DESTACADO = 30  # uno que vence en días no es algo para ir a mirar
+MAX_DESTACADOS_POR_CORRIDA = 3
+
+TIPOS_DE_FAVORITOS = ("vencimiento", "pago", "variacion", "tir", "rendimiento", "score")  # solo se muestran mientras el instrumento siga en favoritos
+TIPO_DESTACADO = "destacado"
+TIPOS = TIPOS_DE_FAVORITOS + (TIPO_DESTACADO,)
 
 
 @dataclass(frozen=True)
@@ -154,9 +164,27 @@ def aviso_score(ticker: str, nombre: str, score: int | None, score_previo: int |
     )
 
 
+def aviso_destacado(ticker: str, nombre: str, retorno: float | None, inflacion: float | None, score: int | None, fecha: date) -> Aviso | None:
+    """Un instrumento fuera de los favoritos que rinde bien: el último mes le ganó a la inflación por UMBRAL_DESTACADO_SOBRE_INFLACION o más y su Score
+    (según el perfil del usuario) es de SCORE_MINIMO_DESTACADO o más. Una vez por instrumento y mes. Es información, no una recomendación."""
+    if retorno is None or inflacion is None or score is None:
+        return None
+    if retorno - inflacion < UMBRAL_DESTACADO_SOBRE_INFLACION or score < SCORE_MINIMO_DESTACADO:
+        return None
+    return Aviso(
+        TIPO_DESTACADO,
+        ticker,
+        f"{ticker} viene rindiendo bien: {_num(retorno * 100)}% en el último mes",
+        f"{nombre} rindió {_num(retorno * 100)}% en {VENTANA_RENDIMIENTO_DIAS} días (la inflación fue {_num(inflacion * 100)}%) y tiene un Score de {score} según tu perfil. "
+        "No está en tus favoritos.",
+        None,
+        f"dest:{ticker}:{fecha.year}-{fecha.month:02d}",
+    )
+
+
 # --- Generación ------------------------------------------------------------------------------------------------------------------------------
-def _usuarios_pro_con_favoritos(db_nofin: Session) -> list[Usuario]:
-    return [u for u in db_nofin.query(Usuario).all() if u.favoritos and plan_de(u) == PLAN_PRO]
+def _usuarios_pro(db_nofin: Session) -> list[Usuario]:
+    return [u for u in db_nofin.query(Usuario).all() if plan_de(u) == PLAN_PRO]
 
 
 def _perfil_y_plazo(usuario: Usuario) -> tuple[str, str]:
@@ -166,9 +194,10 @@ def _perfil_y_plazo(usuario: Usuario) -> tuple[str, str]:
 
 
 def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict:
-    """Crea las notificaciones nuevas de todos los usuarios Pro, a partir de sus favoritos. Devuelve cuántas se crearon por tipo. Idempotente."""
+    """Crea las notificaciones nuevas de todos los usuarios Pro: avisos de sus favoritos y activos destacados que no siguen. Devuelve cuántas se crearon por
+    tipo. Idempotente."""
     hoy = hoy or date.today()
-    usuarios = _usuarios_pro_con_favoritos(db_nofin)
+    usuarios = _usuarios_pro(db_nofin)
     creadas = {t: 0 for t in TIPOS}
     if not usuarios:
         return creadas
@@ -202,10 +231,31 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
     from .routers.rendimiento import _precios_y_flujos  # import acá: ese módulo es un router y no tiene por qué cargarse antes
 
     inicio_ventana = rendimientos.inicio_de_ventana(fin, VENTANA_RENDIMIENTO_DIAS)
-    precios, pagos = _precios_y_flujos(db_fin, tickers, inicio_ventana - timedelta(days=15), fin)
+    # Precios y pagos de todos los instrumentos: los avisos de favoritos y los destacados comparten el cálculo de rendimiento.
+    precios, pagos = _precios_y_flujos(db_fin, None, inicio_ventana - timedelta(days=15), fin)
     uva, mep = referencias.cargar(db_fin, "uva", inicio_ventana), referencias.cargar(db_fin, "mep", inicio_ventana)
     inflacion = referencias.variacion(uva, inicio_ventana, fin)
     pesos_base = pesos_vigentes(db_fin)
+
+    # Rendimiento del último mes de cada instrumento, una sola vez (lo usan el aviso de rendimiento de los favoritos y la búsqueda de destacados).
+    activos = {i.ticker: i for i in db_fin.query(Instrumento).filter(Instrumento.activo.is_(True))}
+    retornos: dict[str, float | None] = {}
+    for ticker, inst in {**activos, **instrumentos}.items():
+        r = rendimientos.calcular(precios.get(ticker, []), pagos.get(ticker, []), inicio_ventana, fin, mep=mep if inst.moneda == "USD" else None)
+        retornos[ticker] = r.retorno if r.estado == "ok" else None
+
+    # Candidatos a destacados: los que le ganan a la inflación por margen, de mayor a menor rendimiento.
+    candidatos: list[tuple[float, str]] = []
+    if inflacion is not None:
+        for ticker, inst in activos.items():
+            retorno = retornos.get(ticker)
+            if retorno is None or retorno - inflacion < UMBRAL_DESTACADO_SOBRE_INFLACION:
+                continue
+            if (inst.vencimiento - fin).days < DIAS_MINIMOS_AL_VENCIMIENTO_DESTACADO:
+                continue
+            candidatos.append((retorno, ticker))
+        candidatos.sort(reverse=True)
+    scoring_de_hoy = {s.instrumento_ticker: s for s in db_fin.query(Scoring).filter(Scoring.fecha_calculo == fin)} if candidatos else {}
 
     # Avisos que no dependen del usuario (se calculan una vez por instrumento).
     por_ticker: dict[str, list[Aviso]] = {}
@@ -218,14 +268,24 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
             avisos.append(aviso_variacion(ticker, inst.nombre, ultima.variacion, fin))
             previas = [c for c in filas if c.tir is not None and c.fecha <= fin - timedelta(days=DIAS_COMPARACION)]
             avisos.append(aviso_tir(ticker, inst.nombre, ultima.tir, previas[-1].tir if previas else None, fin, (inst.vencimiento - fin).days))
-        r = rendimientos.calcular(precios.get(ticker, []), pagos.get(ticker, []), inicio_ventana, fin, mep=mep if inst.moneda == "USD" else None)
-        avisos.append(aviso_rendimiento(ticker, inst.nombre, r.retorno if r.estado == "ok" else None, inflacion, fin))
+        avisos.append(aviso_rendimiento(ticker, inst.nombre, retornos.get(ticker), inflacion, fin))
         por_ticker[ticker] = [a for a in avisos if a is not None]
 
     ahora = datetime.utcnow()
     for usuario in usuarios:
         perfil, plazo = _perfil_y_plazo(usuario)
         existentes = {c for (c,) in db_nofin.query(Notificacion.clave).filter(Notificacion.usuario_id == usuario.id)}
+
+        def guardar(avisos: list[Aviso]) -> None:
+            for a in avisos:
+                if a.clave in existentes:
+                    continue
+                existentes.add(a.clave)
+                db_nofin.add(
+                    Notificacion(usuario_id=usuario.id, tipo=a.tipo, ticker=a.ticker, titulo=a.titulo, mensaje=a.mensaje, fecha_evento=a.fecha_evento, clave=a.clave, creado_en=ahora)
+                )
+                creadas[a.tipo] += 1
+
         for favorito in usuario.favoritos:
             ticker = favorito.instrumento_ticker
             inst = instrumentos.get(ticker)
@@ -242,14 +302,22 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
                 aviso = aviso_score(ticker, inst.nombre, puntaje(filas[-1]), puntaje(previas[-1]) if previas else None, fin)
                 if aviso is not None:
                     avisos.append(aviso)
-            for a in avisos:
-                if a.clave in existentes:
-                    continue
-                existentes.add(a.clave)
-                db_nofin.add(
-                    Notificacion(usuario_id=usuario.id, tipo=a.tipo, ticker=a.ticker, titulo=a.titulo, mensaje=a.mensaje, fecha_evento=a.fecha_evento, clave=a.clave, creado_en=ahora)
-                )
-                creadas[a.tipo] += 1
+            guardar(avisos)
+        # Descubrimiento: los mejores instrumentos que el usuario no tiene en favoritos.
+        seguidos = {f.instrumento_ticker for f in usuario.favoritos}
+        nuevos = 0
+        for retorno, ticker in candidatos:
+            if nuevos >= MAX_DESTACADOS_POR_CORRIDA:
+                break
+            fila = scoring_de_hoy.get(ticker)
+            if ticker in seguidos or fila is None:
+                continue
+            puntaje = compute_score(fila.rendimiento, fila.riesgo, fila.liquidez, fila.estabilidad, perfil, plazo, pesos_base)  # type: ignore[arg-type]
+            a = aviso_destacado(ticker, activos[ticker].nombre, retorno, inflacion, puntaje, fin)
+            if a is None or a.clave in existentes:
+                continue
+            guardar([a])
+            nuevos += 1
     db_nofin.commit()
     logger.info("Notificaciones generadas: %s", creadas)
     return creadas

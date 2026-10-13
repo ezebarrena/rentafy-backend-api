@@ -4,11 +4,13 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.orm import Query as ConsultaSQL, Session
 
 from .. import notificaciones
 from ..deps import get_db_financiera, get_db_no_financiera, require_admin, require_pro
 from ..models_no_financiera import Notificacion, Usuario
+from ..notificaciones import TIPO_DESTACADO
 from ..schemas import ContadorNotificaciones, NotificacionesPagina, NotificacionOut
 
 router = APIRouter(prefix="/notificaciones", tags=["notificaciones"])  # cada ruta pide require_pro; /generar pide admin
@@ -20,8 +22,17 @@ def _out(n: Notificacion) -> NotificacionOut:
     )
 
 
+def _visibles(db: Session, usuario: Usuario) -> ConsultaSQL:
+    """Las notificaciones del usuario que corresponde mostrar: las de un instrumento solo mientras siga en sus favoritos (si lo saca, sus avisos viejos
+    dejan de verse, y si lo vuelve a agregar vuelven); los activos destacados son justamente de instrumentos que no sigue, así que se muestran siempre."""
+    favoritos = [f.instrumento_ticker for f in usuario.favoritos]
+    return db.query(Notificacion).filter(
+        Notificacion.usuario_id == usuario.id, or_(Notificacion.tipo == TIPO_DESTACADO, Notificacion.ticker.in_(favoritos))
+    )
+
+
 def _no_leidas(db: Session, usuario: Usuario) -> int:
-    return db.query(Notificacion).filter(Notificacion.usuario_id == usuario.id, Notificacion.leida_en.is_(None)).count()
+    return _visibles(db, usuario).filter(Notificacion.leida_en.is_(None)).count()
 
 
 @router.get("", response_model=NotificacionesPagina)
@@ -33,7 +44,7 @@ def listar(
     db: Session = Depends(get_db_no_financiera),
 ):
     """Las más nuevas primero."""
-    consulta = db.query(Notificacion).filter(Notificacion.usuario_id == usuario.id)
+    consulta = _visibles(db, usuario)
     if solo_no_leidas:
         consulta = consulta.filter(Notificacion.leida_en.is_(None))
     total = consulta.count()
@@ -49,7 +60,7 @@ def contador(usuario: Usuario = Depends(require_pro), db: Session = Depends(get_
 @router.post("/leer-todas", response_model=ContadorNotificaciones)
 def leer_todas(usuario: Usuario = Depends(require_pro), db: Session = Depends(get_db_no_financiera)):
     ahora = datetime.utcnow()
-    for n in db.query(Notificacion).filter(Notificacion.usuario_id == usuario.id, Notificacion.leida_en.is_(None)):
+    for n in _visibles(db, usuario).filter(Notificacion.leida_en.is_(None)):
         n.leida_en = ahora
     db.commit()
     return ContadorNotificaciones(noLeidas=0)

@@ -125,7 +125,7 @@ class Notificacion(BaseNoFinanciera):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"))
-    tipo: Mapped[str] = mapped_column(String(20))  # vencimiento | pago | variacion | tir | rendimiento | score
+    tipo: Mapped[str] = mapped_column(String(20))  # vencimiento | pago | variacion | tir | rendimiento | score | destacado
     ticker: Mapped[str] = mapped_column(String(20))
     titulo: Mapped[str] = mapped_column(String(160))
     mensaje: Mapped[str] = mapped_column(Text, default="")

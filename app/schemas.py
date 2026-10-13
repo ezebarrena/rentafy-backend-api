@@ -437,7 +437,7 @@ class CurvaUnica(BaseModel):
 
 class NotificacionOut(BaseModel):
     id: int
-    tipo: Literal["vencimiento", "pago", "variacion", "tir", "rendimiento", "score"]
+    tipo: Literal["vencimiento", "pago", "variacion", "tir", "rendimiento", "score", "destacado"]
     ticker: str
     titulo: str
     mensaje: str
