@@ -33,6 +33,19 @@ class FactoresScore(BaseModel):
     modeloId: str
 
 
+class RetornoEsperado(BaseModel):
+    """Cuenta aritmética con la TIR de hoy hasta el horizonte del usuario (o hasta el vencimiento, si es antes). NO es una predicción: supone que el emisor
+    cumple y que la tasa de mercado no cambia (ver lectura_perfil.armar_retorno_esperado)."""
+
+    horizonteMeses: int
+    hastaVencimiento: bool = Field(description="True si el activo vence antes que el horizonte: el retorno es hasta su vencimiento")
+    tirAnual: float
+    retornoPct: float
+    moneda: Moneda
+    caidaPorPuntoDeTasa: Optional[float] = Field(default=None, description="Caída aproximada del precio (%) si las tasas suben 1 punto; solo si el activo sigue vivo en el horizonte")
+    texto: str
+
+
 class LecturaPerfil(BaseModel):
     """Lectura del instrumento para el perfil y el horizonte del solicitante (ver lectura_perfil.py): el veredicto sale del MISMO cálculo
     que el Score, así que el número y el texto no se contradicen. No es asesoramiento financiero."""
@@ -42,6 +55,7 @@ class LecturaPerfil(BaseModel):
     razones: list[str]
     scoreBase: int = Field(description="Score solo con la ponderación de los cuatro factores, antes del ajuste por horizonte")
     ajuste: int = Field(description="Puntos que sumó (+) o restó (−) el ajuste por horizonte: afinidad con el perfil y calce de plazo")
+    retornoEsperado: Optional[RetornoEsperado] = Field(default=None, description="Retorno aritmético a tu horizonte con la TIR de hoy; None sin TIR o si vence en días")
 
 
 class FlujoFondo(BaseModel):

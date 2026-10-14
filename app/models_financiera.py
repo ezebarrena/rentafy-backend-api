@@ -104,6 +104,10 @@ class Modelo(BaseFinanciera):
     pesos: Mapped[list["PesoPerfil"]] = relationship(back_populates="modelo", cascade="all, delete-orphan")
 
 
+# Modelo de los Scores aleatorios con que ingest.py rellena a los instrumentos nuevos hasta que corre el Motor de Scoring (no es un modelo real).
+PLACEHOLDER_MODELO_ID = "placeholder-aleatorio"
+
+
 class Scoring(BaseFinanciera):
     """Los cuatro factores calculados por el Servicio de IA, sin combinar en un único valor."""
 

@@ -18,7 +18,7 @@ from . import referencias, rendimientos
 from .models_financiera import Cotizacion, FlujoFondo, Instrumento, Scoring
 from .models_no_financiera import Notificacion, Usuario
 from .planes import PLAN_PRO, plan_de
-from .scoring import ajuste_para, compute_score, pesos_vigentes
+from .scoring import condicion_scoring_real, pesos_vigentes, score_de_fila
 
 logger = logging.getLogger("rentafy.notificaciones")
 
@@ -223,7 +223,7 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
     scores: dict[str, list[Scoring]] = {}
     for s in (
         db_fin.query(Scoring)
-        .filter(Scoring.instrumento_ticker.in_(tickers), Scoring.fecha_calculo >= fin - timedelta(days=DIAS_COMPARACION + 10))
+        .filter(Scoring.instrumento_ticker.in_(tickers), Scoring.fecha_calculo >= fin - timedelta(days=DIAS_COMPARACION + 10), condicion_scoring_real())
         .order_by(Scoring.fecha_calculo)
     ):
         scores.setdefault(s.instrumento_ticker, []).append(s)
@@ -255,7 +255,7 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
                 continue
             candidatos.append((retorno, ticker))
         candidatos.sort(reverse=True)
-    scoring_de_hoy = {s.instrumento_ticker: s for s in db_fin.query(Scoring).filter(Scoring.fecha_calculo == fin)} if candidatos else {}
+    scoring_de_hoy = {s.instrumento_ticker: s for s in db_fin.query(Scoring).filter(Scoring.fecha_calculo == fin, condicion_scoring_real())} if candidatos else {}
 
     # Avisos que no dependen del usuario (se calculan una vez por instrumento).
     por_ticker: dict[str, list[Aviso]] = {}
@@ -296,7 +296,7 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
             filas = scores.get(ticker, [])
             if filas and filas[-1].fecha_calculo == fin:
                 def puntaje(s: Scoring) -> int | None:
-                    return compute_score(s.rendimiento, s.riesgo, s.liquidez, s.estabilidad, perfil, plazo, pesos_base, ajuste_para(inst, s.fecha_calculo, perfil, plazo))  # type: ignore[arg-type]
+                    return score_de_fila(s, inst, perfil, plazo, pesos_base)
 
                 previas = [s for s in filas if s.fecha_calculo <= fin - timedelta(days=DIAS_COMPARACION)]
                 aviso = aviso_score(ticker, inst.nombre, puntaje(filas[-1]), puntaje(previas[-1]) if previas else None, fin)
@@ -312,7 +312,7 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
             fila = scoring_de_hoy.get(ticker)
             if ticker in seguidos or fila is None:
                 continue
-            puntaje = compute_score(fila.rendimiento, fila.riesgo, fila.liquidez, fila.estabilidad, perfil, plazo, pesos_base, ajuste_para(activos[ticker], fila.fecha_calculo, perfil, plazo))  # type: ignore[arg-type]
+            puntaje = score_de_fila(fila, activos[ticker], perfil, plazo, pesos_base)
             a = aviso_destacado(ticker, activos[ticker].nombre, retorno, inflacion, puntaje, fin)
             if a is None or a.clave in existentes:
                 continue

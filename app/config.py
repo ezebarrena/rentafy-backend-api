@@ -62,3 +62,8 @@ RATE_LIMIT_LOOPBACK = os.getenv("RATE_LIMIT_LOOPBACK", "0") == "1"
 # Ajuste del Score por horizonte (afinidad perfil-tipo de activo y calce de plazo, ver scoring.py:ajuste_horizonte). SCORE_AJUSTE_HORIZONTE=0 lo apaga y
 # el Score vuelve a ser solo la ponderación de los cuatro factores (la base no cambia: el Score se compone al pedirlo).
 SCORE_AJUSTE_HORIZONTE = os.getenv("SCORE_AJUSTE_HORIZONTE", "1").strip().lower() not in ("0", "false", "no")
+
+# El importador (ingest.py) le asigna a todo instrumento nuevo un Score ALEATORIO (modelo "placeholder-aleatorio") hasta que corre el Motor de Scoring del
+# servicio de IA. Por defecto no se muestra: el instrumento aparece "Sin calcular" en vez de con un número inventado. MOSTRAR_SCORE_PLACEHOLDER=1 lo
+# muestra (solo para desarrollo sin el servicio de IA).
+MOSTRAR_SCORE_PLACEHOLDER = os.getenv("MOSTRAR_SCORE_PLACEHOLDER", "0").strip().lower() in ("1", "true", "si", "sí", "yes")

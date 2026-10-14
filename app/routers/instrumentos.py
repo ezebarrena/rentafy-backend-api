@@ -31,7 +31,7 @@ from ..schemas import (
     PuntoHistorico,
     PuntoScore,
 )
-from ..scoring import ajuste_para, compute_score, pesos_vigentes
+from ..scoring import condicion_scoring_real, pesos_vigentes, score_de_fila
 from .mercado import _inflacion_mensual
 from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
@@ -523,7 +523,7 @@ def _historial_scoring_reciente(db: Session, dias: int) -> dict[str, list]:
             rn,
         )
         .join(Instrumento, Instrumento.ticker == Scoring.instrumento_ticker)
-        .filter(Instrumento.activo.is_(True))
+        .filter(Instrumento.activo.is_(True), condicion_scoring_real())
         .subquery()
     )
     filas = (
@@ -609,7 +609,7 @@ def instrumentos_consistentes(
         scores = [
             s
             for f in filas_ticker
-            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base, ajuste_para(instrumento, f.fecha_calculo, perfil, plazo)))
+            if (s := score_de_fila(f, instrumento, perfil, plazo, pesos_base))
             is not None
         ]
         if len(scores) < CONSISTENCIA_MINIMO_DIAS:
@@ -665,7 +665,7 @@ def instrumentos_en_alza(
         scores = [
             s
             for f in filas_ticker
-            if (s := compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base, ajuste_para(instrumento, f.fecha_calculo, perfil, plazo)))
+            if (s := score_de_fila(f, instrumento, perfil, plazo, pesos_base))
             is not None
         ]
         if len(scores) < CONSISTENCIA_MINIMO_DIAS:
@@ -784,7 +784,7 @@ def scoring_historico(
     función que ya arma el valor vigente en to_detail/to_list_item."""
     filas = (
         db.query(Scoring)
-        .filter(Scoring.instrumento_ticker == ticker.upper())
+        .filter(Scoring.instrumento_ticker == ticker.upper(), condicion_scoring_real())
         .order_by(Scoring.fecha_calculo.desc())
         .limit(DIAS_SCORING_HISTORICO)
         .all()
@@ -798,7 +798,7 @@ def scoring_historico(
     instrumento = db.query(Instrumento).filter(Instrumento.ticker == ticker.upper()).first()
     # El ajuste por horizonte usa los años que faltaban para el vencimiento EN CADA FECHA (no hoy): la serie histórica queda consistente con el Score vigente.
     puntos = [
-        (f.fecha_calculo, compute_score(f.rendimiento, f.riesgo, f.liquidez, f.estabilidad, perfil, plazo, pesos_base, ajuste_para(instrumento, f.fecha_calculo, perfil, plazo)))
+        (f.fecha_calculo, score_de_fila(f, instrumento, perfil, plazo, pesos_base))
         for f in filas
     ]
     return [PuntoScore(fecha=fecha, score=score) for fecha, score in puntos if score is not None]

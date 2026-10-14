@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import IA_SERVICE_URL
 from ..deps import get_db_financiera, require_admin
 from ..models_financiera import Instrumento, Scoring
-from ..scoring import AJUSTE_PLAZO, PESOS_PERFIL, _pesos_ajustados, pesos_vigentes
+from ..scoring import MINIMO_FACTORES_AUSENTES_PARA_ANULAR, AJUSTE_PLAZO, PESOS_PERFIL, _pesos_ajustados, ajuste_para, aplicar_ajuste, pesos_vigentes, score_base, score_de_fila
 from ..schemas import PerfilInversor, PlazoInversion
 from ..serializers import ultimas_cotizaciones, ultimos_scoring
 
@@ -45,15 +45,27 @@ def _pesos_explicado(db: Session, ticker: str, perfil: PerfilInversor, plazo: Pl
     faltantes = [k for k, v in factores.items() if v is None]
     peso_total = sum(pesos_finales[k] for k in presentes)
     numerador = sum(v * pesos_finales[k] for k, v in presentes.items())
-    score = round(numerador / peso_total) if peso_total else None
+    # El Score que se devuelve sale del MISMO cálculo que ven los usuarios (scoring.score_de_fila): con 2 o más factores ausentes no hay Score, y se suma el ajuste por horizonte.
+    # La fórmula de abajo es solo la explicación paso a paso de la parte de los factores.
+    base = score_base(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo, pesos_base)
+    ajuste_h = ajuste_para(instrumento, sc.fecha_calculo, perfil, plazo, sc.riesgo)
+    score = score_de_fila(sc, instrumento, perfil, plazo, pesos_base)
 
     terminos = " + ".join(f"{v:.2f}×{pesos_finales[k]:.4f}" for k, v in presentes.items())
     formula_final = (
         f"({terminos}) / ({' + '.join(f'{pesos_finales[k]:.4f}' for k in presentes)}) "
-        f"= {numerador:.4f} / {peso_total:.4f} = {numerador / peso_total:.4f} → round → {score}"
+        f"= {numerador:.4f} / {peso_total:.4f} = {numerador / peso_total:.4f} (Score base)"
         if peso_total
         else "sin factores presentes"
     )
+    if len(faltantes) >= MINIMO_FACTORES_AUSENTES_PARA_ANULAR:
+        formula_final += f" → {len(faltantes)} factores sin calcular: el producto NO muestra Score (MINIMO_FACTORES_AUSENTES_PARA_ANULAR = {MINIMO_FACTORES_AUSENTES_PARA_ANULAR})"
+    elif ajuste_h is not None and base is not None:
+        formula_final += (
+            f" + afinidad {ajuste_h.afinidad:+.2f} − descalce {ajuste_h.descalce:.2f} (acotado, ver scoring.aplicar_ajuste) = {aplicar_ajuste(base, ajuste_h):.2f} → round → {score}"
+        )
+    elif base is not None:
+        formula_final += f" → round → {score}"
 
     return {
         "ticker": ticker,
@@ -78,9 +90,21 @@ def _pesos_explicado(db: Session, ticker: str, perfil: PerfilInversor, plazo: Pl
         "redistribucion": {
             "notas": "Los factores faltantes NO se promedian en partes iguales: el peso_total "
             "de la fórmula de abajo ya excluye su peso, así que los presentes se combinan en la "
-            "MISMA proporción relativa que ya tenían entre sí (ver compute_score en scoring.py).",
+            "MISMA proporción relativa que ya tenían entre sí (ver score_base en scoring.py). Con 2 o más factores faltantes no hay Score.",
             "pesoTotalPresentes": peso_total,
         },
+        "ajusteHorizonte": (
+            None
+            if ajuste_h is None
+            else {
+                "clase": ajuste_h.clase,
+                "aniosAlVencimiento": round(ajuste_h.anios, 3),
+                "afinidad": round(ajuste_h.afinidad, 2),
+                "descalce": round(ajuste_h.descalce, 2),
+                "atenuacionPorCalidad": round(ajuste_h.atenuacion_calidad, 2),
+                "scoreBase": None if base is None else round(base, 2),
+            }
+        ),
         "scoreFinal": {"formula": formula_final, "valor": score},
         "precioActual": cot.precio if cot else None,
     }

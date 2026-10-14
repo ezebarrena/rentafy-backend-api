@@ -24,8 +24,8 @@ from .schemas import (
     PlazoInversion,
     VariacionPeriodo,
 )
-from .lectura_perfil import armar_lectura
-from .scoring import ajuste_para, compute_score, score_base
+from .lectura_perfil import armar_lectura, armar_retorno_esperado, restricciones_operativas
+from .scoring import ajuste_para, condicion_scoring_real, es_scoring_real, score_base, score_de_fila
 
 # (días, para no repetir el número mágico en la query y en el schema de respuesta). Ver análisis
 # de factibilidad: 7/14/30/90 tienen cobertura real hoy en casi todo el catálogo; 180/365 se van
@@ -79,9 +79,10 @@ def _ultima_cotizacion(instrumento: Instrumento):
 
 
 def _ultimo_scoring(instrumento: Instrumento):
-    if not instrumento.scores:
+    reales = [s for s in instrumento.scores if es_scoring_real(s)]
+    if not reales:
         return None
-    return max(instrumento.scores, key=lambda s: s.fecha_calculo)
+    return max(reales, key=lambda s: s.fecha_calculo)
 
 
 def ultimas_cotizaciones(db: Session, tickers: list[str]) -> dict[str, Cotizacion]:
@@ -108,7 +109,7 @@ def ultimos_scoring(db: Session, tickers: list[str]) -> dict[str, Scoring]:
         return {}
     filas = (
         db.query(Scoring)
-        .filter(Scoring.instrumento_ticker.in_(tickers))
+        .filter(Scoring.instrumento_ticker.in_(tickers), condicion_scoring_real())
         .order_by(Scoring.instrumento_ticker, desc(Scoring.fecha_calculo))
         .distinct(Scoring.instrumento_ticker)
         .all()
@@ -125,8 +126,7 @@ def _score(
 ) -> float | None:
     if sc is None:
         return None
-    ajuste = ajuste_para(instrumento, sc.fecha_calculo, perfil, plazo)
-    return compute_score(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo, pesos_base, ajuste)
+    return score_de_fila(sc, instrumento, perfil, plazo, pesos_base)
 
 
 def _lectura_perfil(
@@ -135,6 +135,8 @@ def _lectura_perfil(
     perfil: PerfilInversor,
     plazo: PlazoInversion,
     pesos_base: dict[PerfilInversor, PesosPerfil] | None,
+    cot: Cotizacion,
+    tir_nominal_estimada: float | None,
 ) -> LecturaPerfil | None:
     """Texto y veredicto para el perfil y el horizonte pedidos (ver lectura_perfil.py). None sin Scoring o con el Score sin calcular."""
     if sc is None:
@@ -142,9 +144,13 @@ def _lectura_perfil(
     base = score_base(sc.rendimiento, sc.riesgo, sc.liquidez, sc.estabilidad, perfil, plazo, pesos_base)
     if base is None:
         return None
-    ajuste = ajuste_para(instrumento, sc.fecha_calculo, perfil, plazo)
+    ajuste = ajuste_para(instrumento, sc.fecha_calculo, perfil, plazo, sc.riesgo)
     factores = {"rendimiento": sc.rendimiento, "riesgo": sc.riesgo, "liquidez": sc.liquidez, "estabilidad": sc.estabilidad}
-    return armar_lectura(base, ajuste, factores, perfil, plazo)
+    anios = (instrumento.vencimiento - sc.fecha_calculo).days / 365.0
+    retorno = armar_retorno_esperado(cot.tir, tir_nominal_estimada, instrumento.subtipo, cot.duration, anios, instrumento.moneda, plazo)
+    dias_sin_cotizar = max(0, (sc.fecha_calculo - cot.fecha).days)
+    restricciones = restricciones_operativas(instrumento.liquidez, bool(cot.precio_stale), dias_sin_cotizar)
+    return armar_lectura(base, ajuste, factores, perfil, plazo, retorno, restricciones)
 
 
 def to_list_item(
@@ -205,6 +211,7 @@ def to_detail(
     if cot is None:
         return None
     sc = _ultimo_scoring(instrumento)
+    tir_nominal = _tir_nominal_estimada(instrumento, cot.tir, rem_inflacion_12m)
     return InstrumentoOut(
         ticker=instrumento.ticker,
         nombre=instrumento.nombre,
@@ -221,7 +228,7 @@ def to_detail(
         operaciones=cot.operaciones,
         tir=cot.tir,
         tirSufijo=cot.tir_sufijo,
-        tirNominalEstimada=_tir_nominal_estimada(instrumento, cot.tir, rem_inflacion_12m),
+        tirNominalEstimada=tir_nominal,
         tna=cot.tna,
         duration=cot.duration,
         plazoResidual=cot.plazo_residual,
@@ -249,6 +256,6 @@ def to_detail(
         flujos=[FlujoFondo(fecha=f.fecha, tipo=f.tipo, importe=f.importe) for f in instrumento.flujos],
         resumen=instrumento.resumen,
         score=_score(sc, perfil, plazo, pesos_base, instrumento),
-        lecturaPerfil=_lectura_perfil(sc, instrumento, perfil, plazo, pesos_base),
+        lecturaPerfil=_lectura_perfil(sc, instrumento, perfil, plazo, pesos_base, cot, tir_nominal),
         variacionesPeriodo=_variaciones_periodo(instrumento.cotizaciones, cot.precio, date.today()),
     )

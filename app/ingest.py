@@ -26,10 +26,9 @@ from datetime import date, datetime, timedelta
 import requests
 from sqlalchemy.orm import Session
 
-from .models_financiera import Cotizacion, FlujoFondo, FuenteDatos, Instrumento, Modelo, Scoring
+from .models_financiera import PLACEHOLDER_MODELO_ID, Cotizacion, FlujoFondo, FuenteDatos, Instrumento, Modelo, Scoring
 
 BONOS_URL = "https://compararfondos.com.ar/api/bonos"
-PLACEHOLDER_MODELO_ID = "placeholder-aleatorio"
 
 # Rentafy es una plataforma para renta fija ARGENTINA (ver chapter04.tex, alcance del
 # proyecto): la fuente también trae deuda soberana de otros países ("International", ej.
