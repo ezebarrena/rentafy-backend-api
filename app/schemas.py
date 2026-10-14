@@ -294,6 +294,14 @@ class CambiarPasswordIn(BaseModel):
     passwordNueva: PasswordNueva
 
 
+# Palabra que el usuario tiene que escribir para confirmar la eliminación de su cuenta (el front la pide en el popup; el servidor la vuelve a exigir).
+CONFIRMACION_ELIMINAR_CUENTA = "ELIMINAR"
+
+
+class EliminarCuentaIn(BaseModel):
+    confirmacion: str
+
+
 class MensajeOut(BaseModel):
     mensaje: str
 

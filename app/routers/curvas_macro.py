@@ -5,10 +5,13 @@ from collections import defaultdict
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+import threading
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from .. import curvas_macro
+from .. import curvas_macro, rendimientos
 from ..deps import get_db_financiera
 from ..deps import require_pro
 from ..financial_utils import NOMBRE_REM_INFLACION
@@ -26,6 +29,7 @@ from ..schemas import (
     SensibilidadRiesgoPais,
 )
 from ..serializers import ultimas_cotizaciones
+from .rendimiento import _precios_y_flujos, _ultima_fecha
 from .instrumentos import _ajustar_curva, _puntos_curva_unica, _ultima_inflacion_mensual
 
 router = APIRouter(prefix="/curvas-macro", tags=["curvas-macro"], dependencies=[Depends(require_pro)])
@@ -178,3 +182,73 @@ def sensibilidad_riesgo_pais(db: Session = Depends(get_db_financiera)):
         )
     resultado.sort(key=lambda b: b.porCada100pb)  # los más expuestos (caída más grande) primero
     return SensibilidadRiesgoPais(bonos=resultado, desde=inicio, hasta=hoy)
+
+
+# --- Rendimiento de un grupo de instrumentos (pestaña "Instrumentos" de Analítica) ---------------------------------------------------------------
+VENTANAS_GRUPO = {"7d": 7, "14d": 14, "1m": 30, "3m": 90}
+MAX_GANADORES = 10
+_cache_grupo: dict[tuple[str, str], tuple[float, dict]] = {}
+_lock_grupo = threading.Lock()
+CACHE_GRUPO_SEGUNDOS = 600
+
+
+def serie_mediana_del_grupo(precios: dict, pagos: dict, inicio: date, fin: date) -> list[dict]:
+    """Rendimiento total mediano acumulado del grupo desde `inicio`, rueda por rueda: en cada fecha, la mediana del rendimiento de cada instrumento entre
+    `inicio` y esa fecha (solo cuentan los que tienen historia y datos sin dudas; con menos de 3 no se informa). Arranca en 0 % el día de inicio."""
+    fechas = sorted({f for serie in precios.values() for f, _ in serie if inicio < f <= fin})
+    puntos = [{"fecha": inicio.isoformat(), "mediana": 0.0, "n": len(precios)}]
+    for f in fechas:
+        valores = []
+        for ticker, serie in precios.items():
+            r = rendimientos.calcular(serie, pagos.get(ticker, []), inicio, f)
+            if r.estado == "ok":
+                valores.append(r.retorno)
+        m = rendimientos.mediana(valores)
+        if m is not None:
+            puntos.append({"fecha": f.isoformat(), "mediana": m, "n": len(valores)})
+    return puntos
+
+
+@router.get("/grupo-rendimiento")
+def grupo_rendimiento(
+    grupo: str = Query(..., description="Subtipo del instrumento si lo tiene, si no el tipo (ej. «Bono USD», «BONCER», «ON»)"),
+    ventana: str = Query("1m"),
+    db: Session = Depends(get_db_financiera),
+):
+    """Cómo viene rindiendo un grupo de instrumentos: la mediana de su rendimiento total acumulado en la ventana (serie para el gráfico), y los que más y los que
+    menos rindieron (hasta MAX_GANADORES de cada lado, sin repetir un instrumento en las dos listas). Cada instrumento se mide en su moneda. Es información histórica."""
+    if ventana not in VENTANAS_GRUPO:
+        raise HTTPException(400, f"Ventana inválida «{ventana}»: usá {', '.join(VENTANAS_GRUPO)}")
+    clave = (grupo, ventana)
+    with _lock_grupo:
+        guardado = _cache_grupo.get(clave)
+        if guardado and time.time() - guardado[0] < CACHE_GRUPO_SEGUNDOS:
+            return guardado[1]
+    instrumentos = {i.ticker: i for i in db.query(Instrumento).filter(Instrumento.activo.is_(True)) if (i.subtipo or i.tipo) == grupo}
+    if not instrumentos:
+        raise HTTPException(404, f"No hay instrumentos del grupo «{grupo}»")
+    fin = _ultima_fecha(db)
+    inicio = rendimientos.inicio_de_ventana(fin, VENTANAS_GRUPO[ventana]) if fin else None
+    vacio = {"grupo": grupo, "ventana": ventana, "desde": inicio.isoformat() if inicio else None, "hasta": fin.isoformat() if fin else None, "n": 0, "serie": [], "ganadores": [], "perdedores": []}
+    if fin is None:
+        return vacio
+    precios, pagos = _precios_y_flujos(db, list(instrumentos), inicio - timedelta(days=15), fin)
+    precios = {t: precios[t] for t in instrumentos if t in precios}
+
+    filas = []
+    for ticker, inst in instrumentos.items():
+        r = rendimientos.calcular(precios.get(ticker, []), pagos.get(ticker, []), inicio, fin)
+        if r.estado == "ok":
+            filas.append({"ticker": ticker, "nombre": inst.nombre, "moneda": inst.moneda, "retorno": r.retorno})
+    filas.sort(key=lambda x: x["retorno"], reverse=True)
+    k = min(MAX_GANADORES, len(filas) // 2)
+    resultado = {
+        **vacio,
+        "n": len(filas),
+        "serie": serie_mediana_del_grupo({t: precios[t] for t in (f["ticker"] for f in filas)}, pagos, inicio, fin) if len(filas) >= rendimientos.MINIMO_PARA_MEDIANA else [],
+        "ganadores": filas[:k],
+        "perdedores": list(reversed(filas[len(filas) - k:])) if k else [],
+    }
+    with _lock_grupo:
+        _cache_grupo[clave] = (time.time(), resultado)
+    return resultado

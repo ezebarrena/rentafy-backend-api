@@ -11,10 +11,20 @@ from sqlalchemy.orm import Session
 from .. import codigos, email_templates, emailing
 from ..config import GOOGLE_CLIENT_ID, PLAN_SWITCH_HABILITADO
 from ..deps import es_admin, get_current_user, get_db_no_financiera
-from ..models_no_financiera import AvatarUsuario, PerfilInversorHistorial, PlanUsuario, PlazoInversionHistorial, Usuario
+from ..models_no_financiera import (
+    AvatarUsuario,
+    CodigoEmail,
+    Notificacion,
+    PerfilInversorHistorial,
+    PlanUsuario,
+    PlazoInversionHistorial,
+    Usuario,
+)
 from ..planes import LIMITE_FAVORITOS, PLAN_CASUAL, plan_de
 from ..schemas import (
+    CONFIRMACION_ELIMINAR_CUENTA,
     CambiarPasswordIn,
+    EliminarCuentaIn,
     EmailIn,
     MensajeOut,
     RestablecerPasswordIn,
@@ -233,6 +243,25 @@ def cambiar_password(
     db.commit()
     _avisar_cambio_de_password(tareas, usuario)
     return MensajeOut(mensaje="Listo, cambiamos tu contraseña.")
+
+
+@router.delete("/me", response_model=MensajeOut)
+def eliminar_cuenta(
+    datos: EliminarCuentaIn,
+    usuario: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db_no_financiera),
+):
+    """Elimina la cuenta y TODOS los datos del usuario (Ley 25.326, derecho de supresión): perfil, historial de perfil y horizonte, favoritos, plan, avatar, notificaciones
+    y códigos pendientes. Rentafy no conserva nada de eso. Pide escribir la palabra de confirmación para que no se dispare por un clic o una llamada suelta; el token
+    queda inválido porque el usuario ya no existe."""
+    if datos.confirmacion.strip().upper() != CONFIRMACION_ELIMINAR_CUENTA:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Para eliminar tu cuenta escribí {CONFIRMACION_ELIMINAR_CUENTA}.")
+    # Las tablas con ON DELETE CASCADE las borraría la base, pero se borran explícitamente para no depender de que el motor lo aplique (SQLite, por ejemplo, no lo hace sin pedirlo).
+    db.query(Notificacion).filter(Notificacion.usuario_id == usuario.id).delete(synchronize_session=False)
+    db.query(CodigoEmail).filter(CodigoEmail.usuario_id == usuario.id).delete(synchronize_session=False)
+    db.delete(usuario)  # perfiles, plazos, favoritos, plan y avatar salen por el cascade del modelo
+    db.commit()
+    return MensajeOut(mensaje="Eliminamos tu cuenta y todos tus datos.")
 
 
 @router.get("/me", response_model=UsuarioOut)

@@ -84,3 +84,20 @@ def test_unir_inflacion_junta_el_mensual_con_el_interanual_por_mes():
         {"fecha": date(2026, 7, 31), "mensual": 2.1, "interanual": None},
         {"fecha": date(2026, 8, 31), "mensual": 1.7, "interanual": 33.5},
     ]
+
+
+def test_serie_mediana_del_grupo_arranca_en_cero_y_exige_tres_instrumentos():
+    from datetime import date, timedelta
+
+    from app.routers.curvas_macro import serie_mediana_del_grupo
+
+    inicio = date(2026, 9, 1)
+    def precios(final):  # +final en 10 días, escalonado
+        return [(inicio + timedelta(days=d), 100 + final * d / 10) for d in range(0, 11)]
+    grupo = {"A": precios(1.0), "B": precios(2.0), "C": precios(3.0)}
+    serie = serie_mediana_del_grupo(grupo, {}, inicio, inicio + timedelta(days=10))
+    assert serie[0]["mediana"] == 0.0 and serie[0]["fecha"] == "2026-09-01"
+    assert abs(serie[-1]["mediana"] - 0.02) < 1e-9  # la mediana de 1 %, 2 % y 3 %
+    assert serie[-1]["n"] == 3
+    solo_dos = serie_mediana_del_grupo({"A": grupo["A"], "B": grupo["B"]}, {}, inicio, inicio + timedelta(days=10))
+    assert len(solo_dos) == 1  # con menos de 3 instrumentos no se informa la mediana

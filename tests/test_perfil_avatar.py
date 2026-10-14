@@ -124,3 +124,51 @@ def test_avatar_rechaza_simbolos_y_caracteres_de_control():
             assert False, malo
         except HTTPException as e:
             assert e.status_code == 422
+
+
+def test_eliminar_cuenta_borra_al_usuario_y_todos_sus_datos():
+    from app.models_no_financiera import (
+        AvatarUsuario,
+        CodigoEmail,
+        Favorito,
+        Notificacion,
+        PerfilInversorHistorial,
+        PlanUsuario,
+        PlazoInversionHistorial,
+    )
+    from datetime import datetime
+    from app.schemas import EliminarCuentaIn
+
+    db, u = _sesion()
+    otro = Usuario(nombre="Otro", apellido="Usuario", email="otro@x.com", password_hash="x")
+    db.add(otro)
+    db.commit()
+    for propio in (u, otro):
+        db.add_all(
+            [
+                PerfilInversorHistorial(usuario_id=propio.id, perfil="moderado"),
+                PlazoInversionHistorial(usuario_id=propio.id, plazo="mediano"),
+                Favorito(usuario_id=propio.id, instrumento_ticker="AL30D"),
+                PlanUsuario(usuario_id=propio.id, plan="pro"),
+                AvatarUsuario(usuario_id=propio.id, avatar="Facu"),
+                Notificacion(usuario_id=propio.id, tipo="score", ticker="AL30D", titulo="t", mensaje="m", clave=f"k{propio.id}"),
+                CodigoEmail(usuario_id=propio.id, proposito="verificacion", codigo_hash="h", expira_en=datetime(2030, 1, 1), enviado_en=datetime(2026, 1, 1)),
+            ]
+        )
+    db.commit()
+
+    # sin la palabra de confirmación no se borra nada
+    try:
+        auth.eliminar_cuenta(EliminarCuentaIn(confirmacion="no"), u, db)
+        assert False
+    except HTTPException as e:
+        assert e.status_code == 400
+    assert db.query(Usuario).filter(Usuario.id == u.id).count() == 1
+
+    auth.eliminar_cuenta(EliminarCuentaIn(confirmacion=" eliminar "), u, db)
+    for modelo in (PerfilInversorHistorial, PlazoInversionHistorial, Favorito, PlanUsuario, AvatarUsuario, Notificacion, CodigoEmail):
+        col = modelo.usuario_id
+        assert db.query(modelo).filter(col == u.id).count() == 0, modelo.__name__
+        assert db.query(modelo).filter(col == otro.id).count() == 1, modelo.__name__  # lo de los demás no se toca
+    assert db.query(Usuario).filter(Usuario.id == u.id).count() == 0
+    assert db.query(Usuario).filter(Usuario.id == otro.id).count() == 1
