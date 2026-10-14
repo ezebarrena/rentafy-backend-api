@@ -25,6 +25,7 @@ from .schemas import (
     VariacionPeriodo,
 )
 from .lectura_perfil import armar_lectura, armar_retorno_esperado, restricciones_operativas
+from .resumen_texto import resumen_completo, resumen_corto
 from .scoring import ajuste_para, condicion_scoring_real, es_scoring_real, score_base, score_de_fila
 
 # (días, para no repetir el número mágico en la query y en el schema de respuesta). Ver análisis
@@ -186,7 +187,7 @@ def to_list_item(
         tirSufijo=cot.tir_sufijo,
         riesgo=_riesgo_bucket(sc.riesgo) if sc is not None else instrumento.riesgo,
         liquidez=instrumento.liquidez,
-        resumen=instrumento.resumen,
+        resumen=resumen_corto(instrumento.resumen),
         score=_score(sc, perfil, plazo, pesos_base, instrumento),
     )
 
@@ -254,7 +255,8 @@ def to_detail(
             else None
         ),
         flujos=[FlujoFondo(fecha=f.fecha, tipo=f.tipo, importe=f.importe) for f in instrumento.flujos],
-        resumen=instrumento.resumen,
+        resumen=resumen_corto(instrumento.resumen),
+        resumenCompleto=resumen_completo(instrumento.resumen),
         score=_score(sc, perfil, plazo, pesos_base, instrumento),
         lecturaPerfil=_lectura_perfil(sc, instrumento, perfil, plazo, pesos_base, cot, tir_nominal),
         variacionesPeriodo=_variaciones_periodo(instrumento.cotizaciones, cot.precio, date.today()),

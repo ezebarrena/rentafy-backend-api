@@ -112,7 +112,7 @@ def veredicto_de(final: float, ajuste_total: float) -> str:
 
 _TITULO = {
     "recomendable": "Recomendable para tu perfil y tu horizonte",
-    "con_reservas": "Con reservas para tu perfil y tu horizonte",
+    "con_reservas": "Aceptable para tu perfil y tu horizonte",
     "no_recomendable": "No recomendable para tu perfil y tu horizonte",
 }
 
@@ -130,7 +130,7 @@ def armar_lectura(
     total = final - base
     veredicto = veredicto_de(final, total)
     # Restricciones de operabilidad (liquidez baja, precio sin actualizar): un activo que no se puede vender o no tiene precio reciente no puede ser
-    # "recomendable" por buen Score que tenga; el Score no cambia, pero el veredicto baja a "con reservas" y la razón va primero.
+    # "recomendable" por buen Score que tenga; el Score no cambia, pero el veredicto baja a "aceptable" (valor interno con_reservas) y la razón va primero.
     restricciones = restricciones or []
     if restricciones and veredicto == "recomendable":
         veredicto = "con_reservas"

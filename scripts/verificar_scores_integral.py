@@ -486,7 +486,7 @@ def resumen_clases(filas) -> str:
 
 
 def veredictos(filas) -> str:
-    lineas = ["| Perfil · plazo | Recomendable | Con reservas | No recomendable | Sin Score |", "|---|---|---|---|---|"]
+    lineas = ["| Perfil · plazo | Recomendable | Aceptable | No recomendable | Sin Score |", "|---|---|---|---|---|"]
     for perfil in PERFILES:
         for plazo in PLAZOS:
             g = [f for f in filas if f["perfil"] == perfil and f["plazo"] == plazo]

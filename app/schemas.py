@@ -108,7 +108,8 @@ class InstrumentoOut(BaseModel):
         default=None, description="Null cuando el instrumento todavía no tiene Scoring calculado (RNF-29)"
     )
     flujos: list[FlujoFondo]
-    resumen: str = ""
+    resumen: str = Field(default="", description="Resumen corto (oración de factores): listados, tarjetas y vista previa")
+    resumenCompleto: str = Field(default="", description="Resumen corto más el contexto del instrumento (qué es, vence, TIR): solo para el Análisis Rentafy de la ficha")
     score: Optional[float] = Field(default=None, description="Score ya ponderado según el perfil solicitado")
     lecturaPerfil: Optional[LecturaPerfil] = Field(default=None, description="Texto y veredicto para el perfil y el horizonte solicitados; None sin Scoring")
     variacionesPeriodo: list[VariacionPeriodo] = Field(
