@@ -267,6 +267,8 @@ class UsuarioRegistro(BaseModel):
     apellido: ApellidoOpcional = ""
     email: EmailRegistro
     password: PasswordNueva
+    # El usuario aceptó la Política de Privacidad y los Términos (casilla del registro). Sin esto el servidor no crea la cuenta.
+    aceptaTerminos: bool = False
 
 
 class UsuarioLogin(BaseModel):
@@ -311,6 +313,8 @@ class GoogleLogin(BaseModel):
     se valida server-side contra la API de Google antes de confiar en su contenido."""
 
     idToken: str
+    # Solo hace falta cuando la cuenta se crea en este mismo llamado: ver /auth/google.
+    aceptaTerminos: bool = False
 
 
 class TokenOut(BaseModel):

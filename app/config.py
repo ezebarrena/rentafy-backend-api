@@ -24,6 +24,8 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split("
 
 # Switch de prueba del plan (Casual/Pro) del menú de perfil: mientras no haya cobro, cualquier usuario puede cambiar su propio plan. Con
 # PLAN_SWITCH_HABILITADO=false el endpoint PUT /auth/me/plan responde 403 (para cuando se integre el pago).
+# Versión vigente de la Política de Privacidad y los Términos: es lo que queda registrado cuando alguien los acepta (si el texto cambia, se sube la versión).
+VERSION_TERMINOS = os.getenv("VERSION_TERMINOS", "2026-10")
 PLAN_SWITCH_HABILITADO = os.getenv("PLAN_SWITCH_HABILITADO", "true").strip().lower() not in ("0", "false", "no")
 
 # Plan de los usuarios que nunca eligieron uno (sin fila en `planes_usuario`: cuentas nuevas y existentes). Mientras no haya cobro todos arrancan Pro

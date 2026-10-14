@@ -36,6 +36,8 @@ class Usuario(BaseNoFinanciera):
     plan_registro: Mapped["PlanUsuario | None"] = relationship(back_populates="usuario", uselist=False, cascade="all, delete-orphan")
     # Avatar (nombre imaginario, hasta 10 caracteres): es el que se muestra en la barra y en el resto de la app. Tabla aparte, sin fila = no eligió uno.
     avatar_registro: Mapped["AvatarUsuario | None"] = relationship(back_populates="usuario", uselist=False, cascade="all, delete-orphan")
+    # Consentimiento: versión de la Política de Privacidad y los Términos que aceptó al crear la cuenta y cuándo (Ley 25.326).
+    consentimiento: Mapped["ConsentimientoUsuario | None"] = relationship(back_populates="usuario", uselist=False, cascade="all, delete-orphan")
 
 
 class PerfilInversorHistorial(BaseNoFinanciera):
@@ -147,3 +149,16 @@ class AvatarUsuario(BaseNoFinanciera):
     actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     usuario: Mapped["Usuario"] = relationship(back_populates="avatar_registro")
+
+
+class ConsentimientoUsuario(BaseNoFinanciera):
+    """Aceptación de la Política de Privacidad y los Términos (Ley 25.326): qué versión del texto y cuándo. Tabla propia (en vez de columnas de `usuarios`) por lo
+    mismo que `PlanUsuario` y `AvatarUsuario`: no hay migraciones. Se borra con la cuenta."""
+
+    __tablename__ = "consentimientos_usuario"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True)
+    version: Mapped[str] = mapped_column(String(20))
+    aceptado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="consentimiento")

@@ -172,3 +172,22 @@ def test_eliminar_cuenta_borra_al_usuario_y_todos_sus_datos():
         assert db.query(modelo).filter(col == otro.id).count() == 1, modelo.__name__  # lo de los demás no se toca
     assert db.query(Usuario).filter(Usuario.id == u.id).count() == 0
     assert db.query(Usuario).filter(Usuario.id == otro.id).count() == 1
+
+
+def test_registro_exige_aceptar_los_terminos_y_deja_constancia():
+    from fastapi import BackgroundTasks
+
+    from app.models_no_financiera import ConsentimientoUsuario
+
+    db, _ = _sesion()
+    base = dict(nombre="Ana", apellido="Paz", email="ana@x.com", password="Abcdef12")
+    try:
+        auth.registrar(UsuarioRegistro(**base), BackgroundTasks(), db)
+        assert False
+    except HTTPException as e:
+        assert e.status_code == 400
+    assert db.query(Usuario).filter(Usuario.email == "ana@x.com").count() == 0  # sin aceptación no se crea nada
+    auth.registrar(UsuarioRegistro(**base, aceptaTerminos=True), BackgroundTasks(), db)
+    u = db.query(Usuario).filter(Usuario.email == "ana@x.com").one()
+    c = db.query(ConsentimientoUsuario).filter(ConsentimientoUsuario.usuario_id == u.id).one()
+    assert c.version and c.aceptado_en is not None

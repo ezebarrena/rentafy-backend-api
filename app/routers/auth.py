@@ -9,11 +9,12 @@ from google.oauth2 import id_token as google_id_token
 from sqlalchemy.orm import Session
 
 from .. import codigos, email_templates, emailing
-from ..config import GOOGLE_CLIENT_ID, PLAN_SWITCH_HABILITADO
+from ..config import GOOGLE_CLIENT_ID, PLAN_SWITCH_HABILITADO, VERSION_TERMINOS
 from ..deps import es_admin, get_current_user, get_db_no_financiera
 from ..models_no_financiera import (
     AvatarUsuario,
     CodigoEmail,
+    ConsentimientoUsuario,
     Notificacion,
     PerfilInversorHistorial,
     PlanUsuario,
@@ -101,11 +102,26 @@ def _to_out(usuario: Usuario) -> UsuarioOut:
     )
 
 
+# Detalle del 400 de /auth/google cuando se intenta crear una cuenta nueva sin haber aceptado los términos: el front lo reconoce por este valor.
+CONSENTIMIENTO_REQUERIDO = "CONSENTIMIENTO_REQUERIDO"
+
+
+def _registrar_consentimiento(db: Session, usuario: Usuario) -> None:
+    """Deja asentado que el usuario aceptó la versión vigente de la Política de Privacidad y los Términos (y cuándo)."""
+    if usuario.consentimiento is None:
+        db.add(ConsentimientoUsuario(usuario_id=usuario.id, version=VERSION_TERMINOS, aceptado_en=datetime.utcnow()))
+    else:
+        usuario.consentimiento.version = VERSION_TERMINOS
+        usuario.consentimiento.aceptado_en = datetime.utcnow()
+
+
 @router.post("/registro", response_model=UsuarioOut, status_code=status.HTTP_201_CREATED)
 def registrar(datos: UsuarioRegistro, tareas: BackgroundTasks, db: Session = Depends(get_db_no_financiera)):
     """Crea la cuenta y manda por mail un código para confirmar el correo: hasta confirmarlo, la cuenta no puede iniciar
     sesión. Si ese correo ya tiene una cuenta SIN confirmar (alguien que no terminó el registro), se pisan sus datos con
     los nuevos y se manda un código nuevo, en vez de dejarla trabada con un 409."""
+    if not datos.aceptaTerminos:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Para crear tu cuenta tenés que aceptar la Política de Privacidad y los Términos.")
     existente = db.query(Usuario).filter(Usuario.email == datos.email).first()
     if existente is not None:
         if not codigos.pendiente(db, existente, codigos.VERIFICACION):
@@ -113,6 +129,7 @@ def registrar(datos: UsuarioRegistro, tareas: BackgroundTasks, db: Session = Dep
         existente.nombre = datos.nombre
         existente.apellido = datos.apellido
         existente.password_hash = hash_password(datos.password)
+        _registrar_consentimiento(db, existente)
         db.commit()
         _mandar_codigo(tareas, db, existente, codigos.VERIFICACION)
         return _to_out(existente)
@@ -129,6 +146,7 @@ def registrar(datos: UsuarioRegistro, tareas: BackgroundTasks, db: Session = Dep
 
     db.add(PerfilInversorHistorial(usuario_id=usuario.id, perfil="moderado"))
     db.add(PlazoInversionHistorial(usuario_id=usuario.id, plazo="mediano"))
+    _registrar_consentimiento(db, usuario)
     db.commit()
     db.refresh(usuario)
     _mandar_codigo(tareas, db, usuario, codigos.VERIFICACION)
@@ -162,6 +180,8 @@ def login_google(datos: GoogleLogin, db: Session = Depends(get_db_no_financiera)
         if usuario is not None:
             usuario.sso_id = payload["sub"]  # cuenta ya existía por email/password: se vincula con Google
         else:
+            if not datos.aceptaTerminos:  # cuenta nueva: hace falta que haya aceptado la Política de Privacidad y los Términos
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, CONSENTIMIENTO_REQUERIDO)
             usuario = Usuario(
                 nombre=payload.get("given_name", "")[:MAX_NOMBRE],  # Google no respeta nuestro tope de 20 caracteres
                 apellido=payload.get("family_name", "")[:MAX_NOMBRE],
@@ -176,6 +196,7 @@ def login_google(datos: GoogleLogin, db: Session = Depends(get_db_no_financiera)
             db.refresh(usuario)
             db.add(PerfilInversorHistorial(usuario_id=usuario.id, perfil="moderado"))
             db.add(PlazoInversionHistorial(usuario_id=usuario.id, plazo="mediano"))
+            _registrar_consentimiento(db, usuario)
         db.commit()
         db.refresh(usuario)
 
@@ -259,6 +280,7 @@ def eliminar_cuenta(
     # Las tablas con ON DELETE CASCADE las borraría la base, pero se borran explícitamente para no depender de que el motor lo aplique (SQLite, por ejemplo, no lo hace sin pedirlo).
     db.query(Notificacion).filter(Notificacion.usuario_id == usuario.id).delete(synchronize_session=False)
     db.query(CodigoEmail).filter(CodigoEmail.usuario_id == usuario.id).delete(synchronize_session=False)
+    db.query(ConsentimientoUsuario).filter(ConsentimientoUsuario.usuario_id == usuario.id).delete(synchronize_session=False)
     db.delete(usuario)  # perfiles, plazos, favoritos, plan y avatar salen por el cascade del modelo
     db.commit()
     return MensajeOut(mensaje="Eliminamos tu cuenta y todos tus datos.")
