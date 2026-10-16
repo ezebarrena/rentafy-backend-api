@@ -241,3 +241,20 @@ def test_en_largo_plazo_hay_un_premio_leve_a_dolares_en_los_tres_perfiles_sin_ca
             assert 0 < a <= 4, (perfil, clase, a)  # leve: nunca más de 4 puntos
         for clase in pesos:
             assert ajuste_horizonte(clase, 6.0, perfil, "largo").afinidad >= 0, (perfil, clase)  # los pesos no se rechazan
+
+
+def test_el_moderado_de_mediano_y_largo_premia_las_on_y_bonos_usd_de_gran_calidad_y_lo_apaga_si_vence_pronto():
+    from app.scoring import ajuste_horizonte
+
+    for plazo in ("mediano", "largo"):
+        alto = ajuste_horizonte("ON", 2.0, "moderado", plazo, riesgo=85.0).afinidad
+        medio = ajuste_horizonte("ON", 2.0, "moderado", plazo, riesgo=65.0).afinidad
+        bajo = ajuste_horizonte("ON", 2.0, "moderado", plazo, riesgo=40.0).afinidad
+        base = ajuste_horizonte("BONCER", 2.0, "moderado", plazo, riesgo=85.0).afinidad
+        assert alto > medio > bajo and alto - bajo == 10.0 and base == 0.0  # máximo con Riesgo >= 80, nada con <= 50, y solo ON/Bono USD
+        # vence en menos de 1 año: ya es corto plazo, el premio se apaga en proporción
+        assert ajuste_horizonte("ON", 0.5, "moderado", plazo, riesgo=85.0).afinidad - ajuste_horizonte("ON", 0.5, "moderado", plazo, riesgo=40.0).afinidad == 5.0
+    # no alcanza a los otros perfiles ni al corto plazo
+    assert ajuste_horizonte("ON", 2.0, "conservador", "mediano", riesgo=90.0).afinidad == 0.0
+    assert ajuste_horizonte("ON", 2.0, "agresivo", "mediano", riesgo=90.0).afinidad == 1.0
+    assert ajuste_horizonte("ON", 2.0, "moderado", "corto", riesgo=90.0).afinidad == 0.0

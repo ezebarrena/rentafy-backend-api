@@ -363,7 +363,8 @@ def bloque_b(r: Resultados, datos, filas) -> None:
     pesos_clases = ("LECAP", "BONCAP", "BONCER", "TAMAR", "DUAL", "Dólar Linked", "Bono ARS")
     for perfil in PERFILES:
         g = list(sel(perfil, "largo"))
-        usd_af = [f["aj"].afinidad for f in g if f["d"]["clase"] in USD]
+        # El premio por CALIDAD a ON/Bono USD del moderado (scoring.premio_por_calidad) es aparte de este premio leve por tipo/moneda: se descuenta para medir solo la inclinación por tipo.
+        usd_af = [f["aj"].afinidad - scoring.premio_por_calidad(f["d"]["clase"], f["aj"].anios, perfil, "largo", f["d"]["sc"].riesgo) for f in g if f["d"]["clase"] in USD]
         peso_neg = [f["d"]["ticker"] for f in g if f["d"]["clase"] in pesos_clases and f["aj"].afinidad < 0]
         ok = bool(usd_af) and all(0 <= a <= 4 for a in usd_af) and mean(usd_af) > 0 and not peso_neg
         r.check("B", f"{perfil.capitalize()} · largo: premio leve (≤ 4 puntos) a ON y bonos en dólares y ningún activo en pesos con afinidad negativa", ok, f"premio medio {mean(usd_af):+.1f}, máximo {max(usd_af):+.1f}; {len(peso_neg)} activos en pesos con castigo")

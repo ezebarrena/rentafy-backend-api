@@ -52,6 +52,7 @@ def test_las_constantes_del_ajuste_y_de_los_pesos_son_iguales():
     assert ia.MINIMO_FACTORES_AUSENTES_PARA_ANULAR == scoring.MINIMO_FACTORES_AUSENTES_PARA_ANULAR
     assert ia.CLASES_CON_RIESGO_DE_EMISOR == scoring.CLASES_CON_RIESGO_DE_EMISOR
     assert (ia.RIESGO_ATENUA_DESDE, ia.RIESGO_ATENUA_TOTAL, ia.FACTOR_MINIMO_CALIDAD) == (scoring.RIESGO_ATENUA_DESDE, scoring.RIESGO_ATENUA_TOTAL, scoring.FACTOR_MINIMO_CALIDAD)
+    assert ia.PREMIO_CALIDAD_MAX == scoring.PREMIO_CALIDAD_MAX and (ia.PREMIO_RIESGO_DESDE, ia.PREMIO_RIESGO_HASTA) == (scoring.PREMIO_RIESGO_DESDE, scoring.PREMIO_RIESGO_HASTA)
     for perfil in ia.PERFILES:
         w = scoring.PESOS_PERFIL[perfil]
         assert ia.PESOS_PARTIDA[perfil] == (w.rendimiento, w.riesgo, w.liquidez, w.estabilidad)

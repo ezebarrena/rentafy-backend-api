@@ -179,6 +179,19 @@ SIN_INCLINACION_A_PROPOSITO: dict[tuple[str, str], tuple[str, ...]] = {
 # Así una ON de alta calidad no se castiga igual que una sin calificación (el Riesgo ya incluye la calificación). El premio y las otras clases no se tocan.
 CLASES_CON_RIESGO_DE_EMISOR = ("ON", "Bono USD")
 RIESGO_ATENUA_DESDE, RIESGO_ATENUA_TOTAL, FACTOR_MINIMO_CALIDAD = 40.0, 75.0, 0.25
+# Premio por calidad (decisión del 16/10): un moderado de mediano o largo plazo tiene que ver ON y bonos en dólares de GRAN calidad (bajo riesgo) arriba, no solo los de mayor tasa con un Riesgo
+# mediocre. Suma hasta PREMIO_CALIDAD_MAX puntos a ON/Bono USD según su factor Riesgo (0 con Riesgo ≤ PREMIO_RIESGO_DESDE, el máximo con Riesgo ≥ PREMIO_RIESGO_HASTA, lineal en el medio) y se apaga
+# gradualmente si vence en menos de 1 año (ya es corto plazo, igual que la afinidad positiva). Va aparte del tope de afinidad: es un premio por calidad, no una inclinación por tipo.
+PREMIO_CALIDAD_MAX: dict[tuple[str, str], float] = {("moderado", "mediano"): 10.0, ("moderado", "largo"): 10.0}
+PREMIO_RIESGO_DESDE, PREMIO_RIESGO_HASTA = 50.0, 80.0
+
+
+def premio_por_calidad(clase: str, anios: float, perfil: PerfilInversor, plazo: PlazoInversion, riesgo: float | None) -> float:
+    maximo = PREMIO_CALIDAD_MAX.get((perfil, plazo), 0.0)
+    if not maximo or riesgo is None or clase not in CLASES_CON_RIESGO_DE_EMISOR:
+        return 0.0
+    tramo = min(1.0, max(0.0, (riesgo - PREMIO_RIESGO_DESDE) / (PREMIO_RIESGO_HASTA - PREMIO_RIESGO_DESDE)))
+    return maximo * tramo * min(1.0, max(0.0, anios) / MIN_ANIOS_AFINIDAD[plazo])
 
 
 def atenuacion_por_calidad(clase: str, riesgo: float | None) -> float:
@@ -252,6 +265,7 @@ def ajuste_horizonte(clase: str, anios: float, perfil: PerfilInversor, plazo: Pl
         afinidad *= min(1.0, 0.5 + 0.5 * anios)  # si vence en menos de 1 año hay poco riesgo de precio y de emisor que castigar: la afinidad negativa se atenúa
     calidad = atenuacion_por_calidad(clase, riesgo) if afinidad < 0 else 1.0
     afinidad *= calidad
+    afinidad += premio_por_calidad(clase, anios, perfil, plazo, riesgo)
     return AjusteHorizonte(clase=clase, anios=anios, afinidad=afinidad, descalce=_descalce(anios, perfil, plazo), atenuacion_calidad=calidad)
 
 
