@@ -43,6 +43,11 @@ CONSISTENCIA_TOP_N = 10
 # instrumentos_en_alza) — 0.7 excluye el caso real detectado (RC2CC, R²≈0.62, puro zigzag) sin
 # ser tan exigente como para pedir una recta casi perfecta.
 UMBRAL_R2_EN_ALZA = 0.7
+# "Scores más consistentes": se ordena por el Score promedio de la ventana (los más altos arriba) y se
+# descartan los que tuvieron una caída/salto brusco entre dos ruedas (más de este tanto en puntos).
+CONSISTENCIA_SALTO_MAXIMO = 10
+# "Scores en alza": pendiente mínima (puntos de Score por rueda) para contar como "viene a la suba"; por debajo es ruido.
+PENDIENTE_MINIMA_EN_ALZA = 0.5
 CURVA_MINIMO_PUNTOS = 3
 # Candidatos a excluir: instrumentos a menos de ~55 días del vencimiento, donde la TIR
 # anualizada amplifica cualquier ruido de precio. No se excluyen todos los que caen acá — ver
@@ -582,11 +587,12 @@ def instrumentos_consistentes(
     """Top {CONSISTENCIA_TOP_N} instrumentos cuyo Score viene siendo alto Y estable en las
     últimas {CONSISTENCIA_DIAS} ruedas — a diferencia de "Oportunidades destacadas"/"La
     oportunidad de hoy", que solo miran el Score de hoy, acá importa que se sostenga día tras
-    día. Se ordena por promedio menos el mayor salto entre dos ruedas consecutivas (ver
-    _salto_maximo): un 89/90/88/91/90 (sin sobresaltos) le gana a un 80/90/80/90/90/90/90/90/
-    90/70 (promedio parecido, pero con una caída de 20 puntos en dos ruedas) — el desvío
-    estándar de toda la ventana diluye ese tipo de salto puntual entre el resto de valores
-    parejos, así que no alcanza como única penalización. Requiere al menos
+    día. Se ordena por el Score promedio de la ventana (los más altos arriba; a igual promedio, el
+    de menor salto) y se descartan los que tuvieron un salto brusco entre dos ruedas consecutivas
+    (más de CONSISTENCIA_SALTO_MAXIMO puntos, ver _salto_maximo): un 80/90/80/90/90/90/90/90/90/70
+    (caída de 20 puntos en dos ruedas) no es "sostenido" aunque su promedio sea parecido — el
+    desvío estándar de toda la ventana diluye ese tipo de salto puntual, por eso se mira el salto
+    máximo. Requiere al menos
     {CONSISTENCIA_MINIMO_DIAS} ruedas con Scoring calculado — con menos que eso no hay
     suficiente historial para hablar de "consistencia" todavía."""
     por_ticker = _historial_scoring_reciente(db, CONSISTENCIA_DIAS)
@@ -614,6 +620,8 @@ def instrumentos_consistentes(
         ]
         if len(scores) < CONSISTENCIA_MINIMO_DIAS:
             continue
+        if _salto_maximo(scores) > CONSISTENCIA_SALTO_MAXIMO:
+            continue
         candidatos.append(
             InstrumentoConsistente(
                 ticker=ticker,
@@ -627,7 +635,7 @@ def instrumentos_consistentes(
             )
         )
 
-    candidatos.sort(key=lambda c: c.scorePromedio - c.saltoMaximo, reverse=True)
+    candidatos.sort(key=lambda c: (-c.scorePromedio, c.saltoMaximo))
     return candidatos[:CONSISTENCIA_TOP_N]
 
 
@@ -641,7 +649,7 @@ def instrumentos_en_alza(
     últimas {CONSISTENCIA_DIAS} — ni el más alto de hoy ("Oportunidades destacadas") ni el más
     estable ("Scores más consistentes"), sino el que está mejorando. Se mide con la pendiente
     de la regresión lineal del Score contra el número de rueda (ver _pendiente_y_ajuste): solo
-    entran los que tienen pendiente positiva Y un R² razonable (ver UMBRAL_R2_EN_ALZA) — sin
+    entran los que tienen una pendiente de al menos PENDIENTE_MINIMA_EN_ALZA puntos por rueda Y un R² razonable (ver UMBRAL_R2_EN_ALZA) — sin
     esto último, una serie que cae fuerte y después zigzaguea en un piso más bajo (ej. un
     instrumento al que se le cae el factor rendimiento a mitad de ventana) puede dar pendiente
     positiva de pura casualidad de qué día arrancó y terminó la ventana, sin ser una tendencia
@@ -671,7 +679,7 @@ def instrumentos_en_alza(
         if len(scores) < CONSISTENCIA_MINIMO_DIAS:
             continue
         pendiente, r2 = _pendiente_y_ajuste(scores)
-        if pendiente <= 0 or r2 < UMBRAL_R2_EN_ALZA:
+        if pendiente < PENDIENTE_MINIMA_EN_ALZA or r2 < UMBRAL_R2_EN_ALZA:
             continue
         candidatos.append(
             InstrumentoEnAlza(
