@@ -6,10 +6,11 @@ integración con compararfondos.com.ar (la fuente central para TIR/duration/fluj
 ingest.py) vía POST /mercado/importar/compararfondos.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..calificaciones import importar_calificaciones
@@ -17,6 +18,7 @@ from ..cauciones import importar_cauciones
 from ..deps import get_db_financiera
 from ..financial_utils import REM_INFLACION_12M_URL, obtener_indicador_mercado
 from ..ingest import importar as importar_compararfondos
+from ..models_financiera import Cotizacion
 from ..schemas import IndicadorMercado
 from ..tir_externo import completar_tir_faltante
 
@@ -114,6 +116,12 @@ def importar_calificaciones_endpoint(db: Session = Depends(get_db_financiera)):
     cada vez que se revisa/actualiza esa tabla, ya que las calificaciones cambian con muy poca
     frecuencia (a diferencia de cauciones/cotizaciones, que sí son diarias)."""
     return importar_calificaciones(db)
+
+
+@router.get("/cierre")
+def fecha_de_cierre(db: Session = Depends(get_db_financiera)) -> dict[str, date | None]:
+    """Fecha de la última rueda con cotizaciones cargadas: el "al cierre del…" que muestra el Dashboard."""
+    return {"fecha": db.query(func.max(Cotizacion.fecha)).scalar()}
 
 
 @router.get("/indicadores", response_model=list[IndicadorMercado])

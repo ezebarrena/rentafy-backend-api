@@ -775,7 +775,7 @@ def historico_instrumento(ticker: str, db: Session = Depends(get_db_financiera))
         .all()
     )
     return [
-        PuntoHistorico(fecha=f.fecha, precio=f.precio, volumen=f.volumen, operaciones=f.operaciones)
+        PuntoHistorico(fecha=f.fecha, precio=f.precio, volumen=f.volumen, operaciones=f.operaciones, tir=f.tir)
         for f in filas
     ]
 

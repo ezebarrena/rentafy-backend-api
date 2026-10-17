@@ -398,6 +398,8 @@ class PuntoHistorico(BaseModel):
     precio: float
     volumen: float
     operaciones: int
+    # TIR de ese día (None si la fuente no la trajo): para el gráfico de fondo de la tarjeta de TIR de la ficha.
+    tir: Optional[float] = None
 
 
 class PuntoScore(BaseModel):

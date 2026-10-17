@@ -70,6 +70,7 @@ def rendimiento_por_tipo(ventana: str = Query("14d"), db: Session = Depends(get_
     precios, pagos = _precios_y_flujos(db, list(instrumentos), inicio - timedelta(days=15), fin)
 
     por_grupo: dict[str, list[float]] = defaultdict(list)
+    ok_por_grupo: dict[str, list[str]] = defaultdict(list)  # tickers con rendimiento válido: son los que arman la serie del gráfico
     monedas: dict[str, Counter] = defaultdict(Counter)
     filtro: dict[str, tuple[str, str | None]] = {}  # grupo -> (tipo, subtipo): lo que necesita la lista de instrumentos para filtrar
     for ticker, inst in instrumentos.items():
@@ -80,6 +81,18 @@ def rendimiento_por_tipo(ventana: str = Query("14d"), db: Session = Depends(get_
         filtro[grupo] = (inst.tipo, inst.subtipo)
         if r.estado == "ok":
             por_grupo[grupo].append(r.retorno)
+            ok_por_grupo[grupo].append(ticker)
+
+    # Import acá y no arriba: curvas_macro ya importa de este módulo (sería circular).
+    from .curvas_macro import serie_mediana_del_grupo
+
+    def serie(g: str) -> list[dict]:
+        """Mediana acumulada del grupo rueda por rueda en la ventana (para el gráfico del home); vacía si el grupo no tiene instrumentos suficientes."""
+        tickers = ok_por_grupo.get(g, [])
+        if len(tickers) < rendimientos.MINIMO_PARA_MEDIANA:
+            return []
+        puntos = serie_mediana_del_grupo({t: precios[t] for t in tickers if t in precios}, pagos, inicio, fin)
+        return [{"fecha": p["fecha"], "mediana": p["mediana"]} for p in puntos]
 
     tipos = [
         {
@@ -89,6 +102,7 @@ def rendimiento_por_tipo(ventana: str = Query("14d"), db: Session = Depends(get_
             "moneda": monedas[g].most_common(1)[0][0],
             "tipo": filtro[g][0],
             "subtipo": filtro[g][1],
+            "serie": serie(g),
         }
         for g, v in por_grupo.items()
     ]
