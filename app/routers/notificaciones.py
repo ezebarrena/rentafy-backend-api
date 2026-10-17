@@ -1,7 +1,7 @@
 """Notificaciones del usuario (plan Pro): lista cronológica, contador de no leídas y marcar como leídas. Las genera notificaciones.py una vez por día
 (ver scheduler.py); `POST /notificaciones/generar` las genera a mano (solo admin, para probar)."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Query as ConsultaSQL, Session
 from .. import notificaciones
 from ..deps import get_db_financiera, get_db_no_financiera, require_admin, require_pro
 from ..models_no_financiera import Notificacion, Usuario
-from ..notificaciones import TIPO_DESTACADO
+from ..notificaciones import HORAS_VIGENCIA, TIPO_DESTACADO
 from ..schemas import ContadorNotificaciones, NotificacionesPagina, NotificacionOut
 
 router = APIRouter(prefix="/notificaciones", tags=["notificaciones"])  # cada ruta pide require_pro; /generar pide admin
@@ -26,8 +26,10 @@ def _visibles(db: Session, usuario: Usuario) -> ConsultaSQL:
     """Las notificaciones del usuario que corresponde mostrar: las de un instrumento solo mientras siga en sus favoritos (si lo saca, sus avisos viejos
     dejan de verse, y si lo vuelve a agregar vuelven); los activos destacados son justamente de instrumentos que no sigue, así que se muestran siempre."""
     favoritos = [f.instrumento_ticker for f in usuario.favoritos]
+    # Además, un aviso solo se ve durante HORAS_VIGENCIA (24 h) desde que se generó.
+    desde = datetime.utcnow() - timedelta(hours=HORAS_VIGENCIA)
     return db.query(Notificacion).filter(
-        Notificacion.usuario_id == usuario.id, or_(Notificacion.tipo == TIPO_DESTACADO, Notificacion.ticker.in_(favoritos))
+        Notificacion.usuario_id == usuario.id, Notificacion.creado_en >= desde, or_(Notificacion.tipo == TIPO_DESTACADO, Notificacion.ticker.in_(favoritos))
     )
 
 

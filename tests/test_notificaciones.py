@@ -141,3 +141,31 @@ def test_los_avisos_de_un_instrumento_dejan_de_verse_si_sale_de_favoritos_pero_l
     nofin.refresh(pro)
     assert visibles() == [("destacado", "BBB")]  # los avisos de AAA ya no se ven ni cuentan como no leídos
     assert router._no_leidas(nofin, pro) == 1
+
+
+def test_un_aviso_solo_se_ve_24_horas_y_las_filas_muy_viejas_se_borran_al_generar():
+    from app.routers import notificaciones as router
+
+    fin, nofin, pro, casual = _escenario_destacados()
+    n.generar(fin, nofin, HOY)
+    ahora = datetime.utcnow()
+    todas = nofin.query(Notificacion).filter(Notificacion.usuario_id == pro.id).all()
+    assert len(todas) >= 2
+    # Recién generados: se ven.
+    assert router._visibles(nofin, pro).count() == len(todas)
+    # A las 23 h siguen visibles; a las 25 h dejan de verse (pero la fila sigue, para no regenerar el mismo evento).
+    for x in todas:
+        x.creado_en = ahora - timedelta(hours=23)
+    nofin.commit()
+    assert router._visibles(nofin, pro).count() == len(todas)
+    for x in todas:
+        x.creado_en = ahora - timedelta(hours=25)
+    nofin.commit()
+    assert router._visibles(nofin, pro).count() == 0
+    assert nofin.query(Notificacion).filter(Notificacion.usuario_id == pro.id).count() == len(todas)
+    # Pasados los días de conservación, la próxima corrida las borra de la base.
+    for x in todas:
+        x.creado_en = ahora - timedelta(days=n.DIAS_CONSERVACION + 1)
+    nofin.commit()
+    n.generar(fin, nofin, HOY)
+    assert nofin.query(Notificacion).filter(Notificacion.usuario_id == pro.id, Notificacion.creado_en < ahora - timedelta(days=n.DIAS_CONSERVACION)).count() == 0

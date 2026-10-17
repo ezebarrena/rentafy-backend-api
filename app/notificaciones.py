@@ -45,6 +45,10 @@ MAX_DESTACADOS_POR_CORRIDA = 3
 
 TIPOS_DE_FAVORITOS = ("vencimiento", "pago", "variacion", "tir", "rendimiento", "score")  # solo se muestran mientras el instrumento siga en favoritos
 TIPO_DESTACADO = "destacado"
+# Vigencia de un aviso: se muestra 24 horas desde que se generó y después deja de verse (ver routers/notificaciones.py:_visibles). La fila se conserva unos días más solo para que
+# el mismo evento (misma `clave`) no se vuelva a generar al día siguiente mientras siga siendo verdad; después se borra de la base.
+HORAS_VIGENCIA = 24
+DIAS_CONSERVACION = 14
 TIPOS = TIPOS_DE_FAVORITOS + (TIPO_DESTACADO,)
 
 
@@ -272,6 +276,8 @@ def generar(db_fin: Session, db_nofin: Session, hoy: date | None = None) -> dict
         por_ticker[ticker] = [a for a in avisos if a is not None]
 
     ahora = datetime.utcnow()
+    # Limpieza: los avisos que ya no se muestran hace días se borran (los de las últimas horas se conservan para no regenerarlos, ver DIAS_CONSERVACION).
+    db_nofin.query(Notificacion).filter(Notificacion.creado_en < ahora - timedelta(days=DIAS_CONSERVACION)).delete(synchronize_session=False)
     for usuario in usuarios:
         perfil, plazo = _perfil_y_plazo(usuario)
         existentes = {c for (c,) in db_nofin.query(Notificacion.clave).filter(Notificacion.usuario_id == usuario.id)}

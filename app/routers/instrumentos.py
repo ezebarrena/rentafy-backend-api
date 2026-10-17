@@ -36,6 +36,8 @@ from .mercado import _inflacion_mensual
 from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 DIAS_SCORING_HISTORICO = 20
+# Tope de lo que puede pedir el gráfico del Score (rangos 1S a Todo): alcanza para más de un año de ruedas.
+DIAS_SCORING_HISTORICO_MAX = 500
 CONSISTENCIA_DIAS = 10
 CONSISTENCIA_MINIMO_DIAS = 5
 CONSISTENCIA_TOP_N = 10
@@ -784,8 +786,9 @@ def scoring_historico(
     db: Session = Depends(get_db_financiera),
     perfil: PerfilInversor = Query("moderado"),
     plazo: PlazoInversion = Query("mediano"),
+    dias: int = Query(DIAS_SCORING_HISTORICO, ge=1, le=DIAS_SCORING_HISTORICO_MAX),
 ):
-    """Score de los últimos {DIAS_SCORING_HISTORICO} días con Scoring calculado, según el
+    """Score de los últimos `dias` días (por defecto {DIAS_SCORING_HISTORICO}) con Scoring calculado, según el
     perfil solicitado. No hay ningún dato nuevo que almacenar para esto: Scoring ya acumula
     una fila por instrumento y día desde que corre el Servicio de IA (no se pisa, a
     diferencia del resumen en Instrumento) — acá solo se les aplica compute_score(), la misma
@@ -794,7 +797,7 @@ def scoring_historico(
         db.query(Scoring)
         .filter(Scoring.instrumento_ticker == ticker.upper(), condicion_scoring_real())
         .order_by(Scoring.fecha_calculo.desc())
-        .limit(DIAS_SCORING_HISTORICO)
+        .limit(dias)
         .all()
     )
     filas.reverse()  # ascendente para el gráfico, igual que /historico
