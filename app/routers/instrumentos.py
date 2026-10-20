@@ -132,6 +132,7 @@ def listar_instrumentos(
     plazo: PlazoInversion = Query("mediano"),
     tipo: Optional[str] = None,
     subtipo: Optional[str] = None,
+    familia: Optional[str] = Query(None, pattern="^[A-Za-z]{1,4}$", description="Familia de bono por las primeras letras del ticker (GD, AL, AO…): el mismo prefijo del ticker"),
     moneda: Optional[str] = None,
     riesgo: Optional[str] = None,
     liquidez: Optional[str] = None,
@@ -177,6 +178,8 @@ def listar_instrumentos(
         query = query.filter(Instrumento.tipo == tipo)
     if subtipo and subtipo != "TODOS":
         query = query.filter(Instrumento.subtipo == subtipo)
+    if familia:
+        query = query.filter(Instrumento.ticker.like(f"{familia.upper()}%"))
     if moneda:
         query = query.filter(Instrumento.moneda == moneda)
     if liquidez and liquidez != "TODOS":
@@ -414,7 +417,8 @@ def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
     suficientes — para la pestaña "Rendimientos". Incluye las cauciones (TNA vs plazo)
     si hay datos disponibles. El detalle de un instrumento puntual no usa este endpoint
     (ver /{ticker}/curva): no necesita los otros grupos."""
-    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True)).all()
+    # Sin los ya vencidos: el backend los mantiene activo=True un mes de gracia (para quien los tenga en favoritos), pero un bono vencido no es parte de la curva de hoy.
+    instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True), Instrumento.vencimiento >= date.today()).all()
     cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
     resultado = list(_construir_curvas(instrumentos, cotizaciones).values())
     # Agregar curva de cauciones al final si existe.
