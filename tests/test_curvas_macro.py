@@ -101,3 +101,30 @@ def test_serie_mediana_del_grupo_arranca_en_cero_y_exige_tres_instrumentos():
     assert serie[-1]["n"] == 3
     solo_dos = serie_mediana_del_grupo({"A": grupo["A"], "B": grupo["B"]}, {}, inicio, inicio + timedelta(days=10))
     assert len(solo_dos) == 1  # con menos de 3 instrumentos no se informa la mediana
+
+
+def test_las_fuentes_mensuales_se_cachean_y_ante_una_falla_se_sirve_el_ultimo_valor():
+    import requests as _rq
+
+    from app.routers import mercado as m
+
+    llamadas = {"n": 0, "falla": False}
+
+    @m._con_cache_de_fuente("prueba_cache")
+    def fuente() -> dict:
+        llamadas["n"] += 1
+        if llamadas["falla"]:
+            raise _rq.RequestException("caída")
+        return {"valor": llamadas["n"]}
+
+    fuente.limpiar_cache()
+    assert fuente() == {"valor": 1} and fuente() == {"valor": 1} and llamadas["n"] == 1  # la segunda no pega a la fuente
+    m._cache_fuentes["prueba_cache"] = (m._cache_fuentes["prueba_cache"][0] - m.TTL_FUENTE_MENSUAL_SEG - 1, {"valor": 1})  # vence
+    llamadas["falla"] = True
+    assert fuente() == {"valor": 1}  # la fuente falla: se sirve el último valor bueno
+    fuente.limpiar_cache()
+    try:
+        fuente()
+        raise AssertionError("sin valor guardado el error se propaga")
+    except _rq.RequestException:
+        pass

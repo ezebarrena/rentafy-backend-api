@@ -6,6 +6,9 @@ integración con compararfondos.com.ar (la fuente central para TIR/duration/fluj
 ingest.py) vía POST /mercado/importar/compararfondos.
 """
 
+import logging
+import threading
+import time
 from datetime import date, datetime
 
 import requests
@@ -32,6 +35,43 @@ _MESES_ES = [
 ]
 
 
+logger = logging.getLogger("rentafy.mercado")
+
+# Inflación mensual y REM salen de fuentes externas que publican una vez por MES, pero se pedían en vivo en cada carga del Dashboard (0,8 a 1,6 s de
+# bloqueo por request). Se guardan en memoria una hora; si la fuente falla se sirve el último valor bueno aunque haya vencido (RNF-09: mejor un dato de hace
+# unas horas que "—"), y solo si nunca hubo uno se propaga el error y el endpoint muestra el valor de referencia.
+TTL_FUENTE_MENSUAL_SEG = 3600
+_cache_fuentes: dict[str, tuple[float, dict]] = {}
+_lock_fuentes = threading.Lock()
+
+
+def _con_cache_de_fuente(nombre: str):
+    def decorador(funcion):
+        def envuelta() -> dict:
+            ahora = time.monotonic()
+            with _lock_fuentes:
+                guardado = _cache_fuentes.get(nombre)
+            if guardado is not None and ahora - guardado[0] < TTL_FUENTE_MENSUAL_SEG:
+                return guardado[1]
+            try:
+                dato = funcion()
+            except requests.RequestException:
+                if guardado is not None:
+                    logger.warning("Fuente %s no disponible: se usa el último valor guardado (de hace %.0f min)", nombre, (ahora - guardado[0]) / 60)
+                    return guardado[1]
+                raise
+            with _lock_fuentes:
+                _cache_fuentes[nombre] = (ahora, dato)
+            return dato
+
+        envuelta.__name__, envuelta.__doc__ = funcion.__name__, funcion.__doc__
+        envuelta.limpiar_cache = lambda: _cache_fuentes.pop(nombre, None)  # para las pruebas
+        return envuelta
+
+    return decorador
+
+
+@_con_cache_de_fuente("inflacion_mensual")
 def _inflacion_mensual() -> dict:
     """Último dato de inflación mensual (IPC) publicado, con el mes al que corresponde."""
     response = requests.get(ARGENTINADATOS_INFLACION_URL, timeout=5)
@@ -56,10 +96,11 @@ def _inflacion_mensual() -> dict:
     return {"valor": ultimo["valor"], "mes_label": mes_label, "tendencia": tendencia, "detalle": detalle}
 
 
+@_con_cache_de_fuente("rem_inflacion")
 def _rem_inflacion_esperada() -> dict:
     """Inflación esperada a 12 meses (REM, BCRA) — mismo criterio que _inflacion_mensual(): la
-    encuesta es mensual, así que se consulta en vivo en cada carga en vez de cachearse (a
-    diferencia de Dólar CCL/MEP y Riesgo País, que sí varían dentro del día)."""
+    encuesta es mensual, así que se guarda en memoria una hora (ver _con_cache_de_fuente); Dólar CCL/MEP y
+    Riesgo País, que sí varían dentro del día, viven en la tabla cache que mantiene el job de las 18:05."""
     response = requests.get(REM_INFLACION_12M_URL, timeout=10)
     response.raise_for_status()
     # "detalle" viene descendente por fecha (el más reciente primero, ver financial_utils.py).
@@ -127,7 +168,7 @@ def fecha_de_cierre(db: Session = Depends(get_db_financiera)) -> dict[str, date 
 @router.get("/indicadores", response_model=list[IndicadorMercado])
 def indicadores_mercado(db: Session = Depends(get_db_financiera)):
     """Indicadores del Dashboard. Inflación mensual e inflación esperada (REM) siguen en vivo
-    (cadencia mensual en la fuente — no justifica cachear). Dólar CCL/MEP y Riesgo País se leen
+    (cadencia mensual en la fuente, con caché en memoria de una hora). Dólar CCL/MEP y Riesgo País se leen
     de la cache que mantiene al día el job de las 18:05 (ver financial_utils.py) en vez de
     pegarle a ArgentinaDatos en cada carga del Dashboard. RNF-09: ante la falla de una fuente en
     vivo (o una cache todavía sin fila) se muestra "—" en vez de un valor inventado."""

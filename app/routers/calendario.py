@@ -3,7 +3,7 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..deps import get_db_financiera
@@ -18,12 +18,14 @@ def eventos_calendario(
     db: Session = Depends(get_db_financiera),
     desde: Optional[date] = None,
     hasta: Optional[date] = None,
+    limite: Optional[int] = Query(None, ge=1, le=5000),
 ):
     # `desde`/`hasta` existen para quien los quiera usar, pero Calendario.tsx hoy pide TODO el
     # calendario sin filtro (navega de mes a mes client-side sobre el array ya traído, no
     # refetchea por mes) — sin límite superior, esto crece con el catálogo. No se le puso un
     # `hasta` por defecto acá porque cambiaría el comportamiento sin que el frontend lo espere;
     # si el catálogo crece mucho, la solución real es que Calendario.tsx pida por mes.
+    # `limite` devuelve solo los primeros N eventos por fecha: el Dashboard muestra 5 y no necesita el resto.
     query = db.query(FlujoFondo, Instrumento).join(Instrumento, FlujoFondo.instrumento_ticker == Instrumento.ticker)
     if desde:
         query = query.filter(FlujoFondo.fecha >= desde)
@@ -39,6 +41,8 @@ def eventos_calendario(
             emisor=instrumento.emisor,
             moneda=instrumento.moneda,
         )
-        for flujo, instrumento in query.order_by(FlujoFondo.fecha).all()
+        for flujo, instrumento in (
+            query.order_by(FlujoFondo.fecha).limit(limite).all() if limite else query.order_by(FlujoFondo.fecha).all()
+        )
     ]
     return eventos
