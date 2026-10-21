@@ -2,6 +2,7 @@
 detalle de instrumentos. Espeja rentafy-frontend/src/data/filters.ts y sort.ts."""
 
 import math
+import re
 import statistics
 import time
 from collections import defaultdict
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..financial_utils import NOMBRE_REM_INFLACION, obtener_rem_inflacion
 from ..deps import get_db_financiera
+from .. import referencias
 from ..models_financiera import Caucion, Cotizacion, IndicadorMacro, Instrumento, Scoring
 from ..schemas import (
     CurvaRendimiento,
@@ -28,6 +30,7 @@ from ..schemas import (
     PlazoInversion,
     PuntoCurva,
     PuntoCurvaUnica,
+    ReferenciaCurvaUnica,
     PuntoHistorico,
     PuntoScore,
 )
@@ -71,11 +74,13 @@ _CURVA_LABELS = {
 
 # Orden fijo de las pestañas/pills en el frontend (no alfabético): los grupos más consultados
 # primero. Cualquier grupo no listado acá cae al final, ordenado alfabéticamente entre sí.
-_CURVA_ORDEN = ["Bonos USD", "Bonos BONCER", "Obligaciones Negociables", "LECAP", "BONCAP"]
+_CURVA_ORDEN = ["Bonos USD", "BONCER", "Obligaciones Negociables", "LECAP", "BONCAP"]
 
 
 def _curva_label(tipo: str, subtipo: Optional[str], moneda: str) -> str:
     if tipo == "BONO":
+        if subtipo == "BONCER":
+            return "BONCER"  # se muestra solo como BONCER, no "Bonos BONCER"
         if subtipo and subtipo.startswith("Bono "):
             return f"Bonos {subtipo[len('Bono '):]}"  # "Bono USD" -> "Bonos USD"
         if subtipo:
@@ -89,6 +94,15 @@ def _curva_orden_key(label: str) -> tuple[int, str]:
         return (_CURVA_ORDEN.index(label), "")
     except ValueError:
         return (len(_CURVA_ORDEN), label)
+
+
+_ALIAS_BOPREAL = re.compile(r"^BPO([A-D]\d)([CD])?$", re.IGNORECASE)
+
+
+def _alias_de_busqueda(q: str) -> str:
+    """Otras plataformas escriben los Bopreales como BPOA7, BPOB8… y acá son BPA7, BPB8…: buscar «BPOA7» encuentra BPA7C y BPA7D."""
+    m = _ALIAS_BOPREAL.match(q.strip())
+    return f"BP{m.group(1)}{m.group(2) or ''}".upper() if m else q
 
 
 def _ajustar_curva(puntos: list[tuple[float, float]]) -> Optional[tuple[float, float, float]]:
@@ -199,7 +213,7 @@ def listar_instrumentos(
     if emisor and emisor != "TODOS":
         query = query.filter(Instrumento.emisor == emisor)
     if q:
-        patron = f"%{q}%"
+        patron = f"%{_alias_de_busqueda(q)}%"
         query = query.filter(Instrumento.ticker.ilike(patron) | Instrumento.nombre.ilike(patron))
     instrumentos = query.all()
 
@@ -265,15 +279,22 @@ def listar_instrumentos(
 
 
 @router.get("/emisores", response_model=list[str])
-def emisores_disponibles(db: Session = Depends(get_db_financiera)):
-    """Lista de emisores distintos del catálogo, para el filtro avanzado (RF-17)."""
-    filas = (
-        db.query(Instrumento.emisor)
-        .filter(Instrumento.activo.is_(True))
-        .distinct()
-        .order_by(Instrumento.emisor)
-        .all()
-    )
+def emisores_disponibles(
+    db: Session = Depends(get_db_financiera),
+    tipo: Optional[str] = None,
+    subtipo: Optional[str] = None,
+    moneda: Optional[Literal["ARS", "USD"]] = None,
+):
+    """Lista de emisores distintos del catálogo, para el filtro avanzado (RF-17). Con `tipo`, `subtipo` y/o `moneda` solo los de ese universo: no se ofrece un
+    emisor que daría una lista vacía con los otros filtros elegidos."""
+    consulta = db.query(Instrumento.emisor).filter(Instrumento.activo.is_(True))
+    if tipo:
+        consulta = consulta.filter(Instrumento.tipo == tipo)
+    if subtipo:
+        consulta = consulta.filter(Instrumento.subtipo == subtipo)
+    if moneda:
+        consulta = consulta.filter(Instrumento.moneda == moneda)
+    filas = consulta.distinct().order_by(Instrumento.emisor).all()
     return [fila[0] for fila in filas]
 
 
@@ -334,7 +355,7 @@ def _construir_curvas(
             continue
         clave = (inst.tipo, inst.subtipo, inst.moneda)
         grupos[clave].append(
-            PuntoCurva(ticker=inst.ticker, nombre=inst.nombre, duration=duration_redondeada, tir=round(cot.tir, 2))
+            PuntoCurva(ticker=inst.ticker, nombre=inst.nombre, duration=duration_redondeada, tir=round(cot.tir, 2), variacion=cot.variacion)
         )
 
     resultado: dict[tuple[str, Optional[str], str], CurvaRendimiento] = {}
@@ -469,12 +490,22 @@ def _puntos_curva_unica(
                 familia=familia,
                 subtipo=inst.subtipo,
                 plazoDias=plazo,
+                duration=round(cot.duration, 3) if cot.duration else None,
                 tir=round(cot.tir, 2),
                 baseTir=base,
             )
         )
     puntos.sort(key=lambda p: p.plazoDias)
     return puntos
+
+
+def _referencias_curva_unica(db: Session) -> list[ReferenciaCurvaUnica]:
+    """Tasa de referencia en pesos para ubicar la curva: el plazo fijo a 30 días (TNA). Las cauciones no van en esta curva."""
+    refs: list[ReferenciaCurvaUnica] = []
+    pf = referencias.cargar(db, "tasa_pf", date.today() - timedelta(days=15))
+    if pf:
+        refs.append(ReferenciaCurvaUnica(nombre="Plazo fijo 30 d", plazoDias=30, tna=round(pf[-1][1], 2)))
+    return refs
 
 
 _IPC_CACHE_SEG = 3600
@@ -505,6 +536,7 @@ def curva_unica(moneda: Literal["ARS", "USD"] = "ARS", db: Session = Depends(get
     ipc = _ultima_inflacion_mensual() if moneda == "ARS" else None  # en dólares no hay escenario: no se pide
     return CurvaUnica(
         instrumentos=_puntos_curva_unica(instrumentos, cotizaciones, moneda),
+        referencias=_referencias_curva_unica(db) if moneda == "ARS" else [],
         plazoMinDias=CURVA_UNICA_PLAZO_MIN_DIAS,
         plazoMaxDias=CURVA_UNICA_PLAZO_MAX_DIAS[moneda],
         inflacionEsperadaAnual=rem.valor if rem else None,

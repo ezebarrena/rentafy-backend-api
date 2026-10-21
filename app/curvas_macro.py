@@ -46,7 +46,7 @@ def serie_riesgo_pais() -> list[tuple[date, float]]:
 
 
 # --- Dólar MEP y CCL (series diarias de ArgentinaDatos, cotización de venta) -------------------------------------------------------------
-_CASAS = {"mep": "bolsa", "ccl": "contadoconliqui"}
+_CASAS = {"mep": "bolsa", "ccl": "contadoconliqui", "oficial": "oficial"}
 _cache_dolar: dict[str, dict] = {k: {"hasta": 0.0, "serie": []} for k in _CASAS}
 
 
@@ -78,8 +78,8 @@ def serie_dolar(clave: str) -> list[tuple[date, float]]:
         return memoria["serie"]
 
 
-def unir_dolares(mep: list[tuple[date, float]], ccl: list[tuple[date, float]], desde: date) -> list[dict]:
-    """Una fila por fecha desde `desde`, con el MEP y el CCL de ese día (None si alguno no cotizó)."""
+def unir_dolares(mep: list[tuple[date, float]], ccl: list[tuple[date, float]], desde: date, oficial: list[tuple[date, float]] | None = None) -> list[dict]:
+    """Una fila por fecha desde `desde`, con el MEP y el CCL de ese día (None si alguno no cotizó). Si se pasa la serie del oficial, cada fila suma también `oficial`."""
     por_fecha: dict[date, dict] = {}
     for f, v in mep:
         if f >= desde:
@@ -87,6 +87,12 @@ def unir_dolares(mep: list[tuple[date, float]], ccl: list[tuple[date, float]], d
     for f, v in ccl:
         if f >= desde:
             por_fecha.setdefault(f, {"fecha": f, "mep": None, "ccl": None})["ccl"] = v
+    if oficial is not None:
+        for fila in por_fecha.values():
+            fila["oficial"] = None
+        for f, v in oficial:
+            if f in por_fecha:
+                por_fecha[f]["oficial"] = v
     return [por_fecha[f] for f in sorted(por_fecha)]
 
 

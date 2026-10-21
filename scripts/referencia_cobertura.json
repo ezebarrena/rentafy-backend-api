@@ -1,0 +1,10 @@
+{
+  "_nota": "Lista de referencia para auditar la cobertura del catálogo (tomada de eldashboard.com.ar, 19/10/2026). Se completa a mano. Los tickers terminados en C o D (MEP/CCL) se comparan sin esa letra. Los Bopreales figuran con su ticker de la otra plataforma (BPOA7): el script los traduce a BPA7.",
+  "Bonares": ["AO27", "AO28", "AO29", "AN29", "AL29", "AL30", "AL35", "AE38", "AL41"],
+  "Globales": ["GD29", "GD30", "GD35", "GD38", "GD41", "GD46"],
+  "Bopreales": ["BPOA7", "BPOB7", "BPOC7", "BPOD7", "BPOA8", "BPOB8"],
+  "LECAP": ["S30O6", "S13N6", "S30N6", "S29E7"],
+  "BONCAP": ["T15E7", "T30A7", "T31Y7", "T30J7"],
+  "TAMAR": ["TTD26", "TMF27", "TML27", "TMG27", "TMF28", "TMG28"],
+  "Bono ARS": ["PR17", "TY30P", "TY30PP"]
+}

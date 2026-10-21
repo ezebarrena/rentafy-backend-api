@@ -9,9 +9,10 @@ import threading
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .. import curvas_macro, rendimientos
+from .. import curvas_macro, evolucion_curva, rendimientos
 from ..deps import get_db_financiera
 from ..deps import require_pro
 from ..financial_utils import NOMBRE_REM_INFLACION
@@ -30,7 +31,7 @@ from ..schemas import (
 )
 from ..serializers import ultimas_cotizaciones
 from .rendimiento import _precios_y_flujos, _ultima_fecha
-from .instrumentos import _ajustar_curva, _puntos_curva_unica, _ultima_inflacion_mensual
+from .instrumentos import _ajustar_curva, _curva_label, _curva_orden_key, _puntos_curva_unica, _ultima_inflacion_mensual
 
 router = APIRouter(prefix="/curvas-macro", tags=["curvas-macro"], dependencies=[Depends(require_pro)])
 
@@ -101,14 +102,14 @@ def inflacion_equilibrio(db: Session = Depends(get_db_financiera)):
 def dolares(desde: Optional[date] = Query(None, description="Por defecto, desde septiembre de 2021")):
     """Serie diaria del dólar MEP y del CCL (venta), una fila por fecha. La fuente es ArgentinaDatos, con un caché de 3 horas."""
     inicio = desde or date(2021, 9, 1)
-    filas = curvas_macro.unir_dolares(curvas_macro.serie_dolar("mep"), curvas_macro.serie_dolar("ccl"), inicio)
+    filas = curvas_macro.unir_dolares(curvas_macro.serie_dolar("mep"), curvas_macro.serie_dolar("ccl"), inicio, curvas_macro.serie_dolar("oficial"))
     return [PuntoDolares(**f) for f in filas]
 
 
 @router.get("/dolar-equilibrio", response_model=DolarEquilibrio)
 def dolar_equilibrio(db: Session = Depends(get_db_financiera)):
-    """Para los instrumentos en pesos con TIR en pesos nominales (tasa fija, TAMAR y duales): cuánto tendría que subir el dólar hasta el
-    vencimiento para igualar al bono. Los CER y dólar linked quedan afuera: su TIR no está en pesos nominales. El dólar de referencia es el MEP."""
+    """Para los instrumentos en pesos con TIR en pesos nominales (tasa fija, TAMAR y DUAL): cuánto tendría que subir el dólar hasta el
+    vencimiento para igualar al bono. Los BONCER y dólar linked quedan afuera: su TIR no está en pesos nominales. El dólar de referencia es el MEP."""
     instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True), Instrumento.moneda == "ARS").all()
     cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
     serie_mep, serie_ccl = curvas_macro.serie_dolar("mep"), curvas_macro.serie_dolar("ccl")
@@ -251,4 +252,51 @@ def grupo_rendimiento(
     }
     with _lock_grupo:
         _cache_grupo[clave] = (time.time(), resultado)
+    return resultado
+
+
+# Una rueda "completa" tiene TIR para al menos esta cantidad de instrumentos; antes de la carga masiva de TIR externa había ruedas con unos pocos datos sueltos.
+RUEDA_COMPLETA_MIN_TIR = 30
+_cache_evolucion: dict = {"hasta": 0.0, "datos": None}
+
+
+@router.get("/evolucion-curva")
+def evolucion_de_la_curva(db: Session = Depends(get_db_financiera)):
+    """Cómo estaba la curva de cada grupo (TIR contra duration) hoy, hace una semana y hace un mes, y si se empinó o se aplanó (ver evolucion_curva.py). Solo
+    con las ruedas que tienen TIR cargada para suficientes instrumentos; si no hay datos tan atrás, esa comparación no aparece."""
+    with _lock_grupo:
+        if _cache_evolucion["datos"] is not None and time.time() < _cache_evolucion["hasta"]:
+            return _cache_evolucion["datos"]
+    filas = (
+        db.query(Cotizacion.fecha, func.count(Cotizacion.tir))
+        .filter(Cotizacion.fecha >= date.today() - timedelta(days=75))
+        .group_by(Cotizacion.fecha)
+        .all()
+    )
+    fechas = sorted(f for f, n in filas if n >= RUEDA_COMPLETA_MIN_TIR)
+    vacio = {"hoy": None, "primeraRueda": fechas[0].isoformat() if fechas else None, "grupos": []}
+    if not fechas:
+        return vacio
+    hoy = fechas[-1]
+    necesarias = {hoy} | {f for f in (evolucion_curva.fecha_de_comparacion(fechas, hoy, d) for _, d in evolucion_curva.COMPARACIONES) if f}
+    instrumentos = {i.ticker: i for i in db.query(Instrumento).filter(Instrumento.activo.is_(True))}
+    por_grupo: dict[tuple, dict[date, list[tuple[float, float]]]] = defaultdict(lambda: defaultdict(list))
+    cotizaciones = db.query(Cotizacion).filter(Cotizacion.fecha.in_(necesarias), Cotizacion.tir.isnot(None), Cotizacion.precio_stale.is_(False)).all()
+    for c in cotizaciones:
+        inst = instrumentos.get(c.instrumento_ticker)
+        if inst is None:
+            continue
+        duration = c.duration if c.duration is not None else c.plazo_residual
+        if duration is None or duration <= 0:
+            continue
+        por_grupo[(inst.tipo, inst.subtipo, inst.moneda)][c.fecha].append((duration, c.tir))
+    grupos = []
+    for (tipo, subtipo, moneda), por_fecha in por_grupo.items():
+        res = evolucion_curva.evolucion_de_grupo(por_fecha, hoy, fechas)
+        if res is not None:
+            grupos.append({"grupo": _curva_label(tipo, subtipo, moneda), "tipo": tipo, "subtipo": subtipo, "moneda": moneda, **res})
+    grupos.sort(key=lambda g: _curva_orden_key(g["grupo"]))
+    resultado = {"hoy": hoy.isoformat(), "primeraRueda": fechas[0].isoformat(), "grupos": grupos}
+    with _lock_grupo:
+        _cache_evolucion["datos"], _cache_evolucion["hasta"] = resultado, time.time() + 1800
     return resultado

@@ -416,6 +416,8 @@ class PuntoCurva(BaseModel):
     nombre: str
     duration: float
     tir: float
+    # Variación diaria del precio (%), la misma que muestra el listado; None en las cauciones.
+    variacion: Optional[float] = None
 
 
 class CurvaRendimiento(BaseModel):
@@ -457,12 +459,23 @@ class PuntoCurvaUnica(BaseModel):
     familia: FamiliaCurvaUnica
     subtipo: Optional[str] = None
     plazoDias: int
+    # Duration modificada de la fuente, en años (None si no la informa: TAMAR, DUAL y dólar linked no traen flujos).
+    duration: Optional[float] = None
     tir: float
     baseTir: BaseTirCurvaUnica
 
 
+class ReferenciaCurvaUnica(BaseModel):
+    """Una tasa de referencia que no es un instrumento (plazo fijo), para ubicarla en la curva en pesos. `tna` en % nominal anual."""
+
+    nombre: str
+    plazoDias: int
+    tna: float
+
+
 class CurvaUnica(BaseModel):
     instrumentos: list[PuntoCurvaUnica]
+    referencias: list[ReferenciaCurvaUnica] = []
     # Rango de plazo (en días) con el que se armó la lista: más corto es ruido y más largo estira el eje.
     plazoMinDias: int
     plazoMaxDias: int
@@ -561,6 +574,8 @@ class PuntoDolares(BaseModel):
     fecha: date
     mep: Optional[float] = None
     ccl: Optional[float] = None
+    # Dólar oficial (venta, ArgentinaDatos), para la brecha contra el MEP y el CCL.
+    oficial: Optional[float] = None
 
 
 class SensibilidadBono(BaseModel):
