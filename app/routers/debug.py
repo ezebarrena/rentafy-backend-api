@@ -4,12 +4,11 @@ para el desglose de CADA factor) en el Score final: pesos por perfil, ajuste por
 inversión, y la redistribución cuando falta algún factor (RNF-29).
 """
 
-import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..config import IA_SERVICE_URL
 from ..deps import get_db_financiera, require_admin
+from ..ia_cliente import consultar_ia
 from ..models_financiera import Instrumento, Scoring
 from ..scoring import MINIMO_FACTORES_AUSENTES_PARA_ANULAR, AJUSTE_PLAZO, PESOS_PERFIL, _pesos_ajustados, ajuste_para, aplicar_ajuste, pesos_vigentes, score_base, score_de_fila
 from ..schemas import PerfilInversor, PlazoInversion
@@ -141,10 +140,5 @@ def debug_completo(
     hace de único punto de entrada público para esta pantalla de testeo."""
     ticker = ticker.upper()
     pesos = _pesos_explicado(db, ticker, perfil, plazo)
-    try:
-        respuesta = requests.get(f"{IA_SERVICE_URL}/debug/{ticker}", timeout=10)
-        respuesta.raise_for_status()
-        factores = respuesta.json()
-    except requests.RequestException as exc:
-        raise HTTPException(502, f"rentafy-servicioIA no disponible en {IA_SERVICE_URL}: {exc}") from exc
+    factores = consultar_ia(f"/debug/{ticker}", timeout=10)
     return {"factores": factores, "pesos": pesos}

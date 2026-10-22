@@ -8,6 +8,8 @@ import math
 from datetime import date, timedelta
 from typing import Optional
 
+from .regresion_curva import ajuste_logaritmico
+
 # Duration mínima (años) para que un punto entre en el ajuste: más corto, la TIR anualizada es ruido (mismo criterio que las curvas por grupo).
 DURATION_MINIMA = 0.15
 MINIMO_PUNTOS = 3
@@ -23,17 +25,7 @@ def ajustar(puntos: list[tuple[float, float]]) -> Optional[tuple[float, float, f
     validos = [(d, t) for d, t in puntos if d >= DURATION_MINIMA]
     if len(validos) < MINIMO_PUNTOS:
         return None
-    xs = [math.log(d) for d, _ in validos]
-    ys = [t for _, t in validos]
-    n = len(xs)
-    xm, ym = sum(xs) / n, sum(ys) / n
-    sxx = sum((x - xm) ** 2 for x in xs)
-    syy = sum((y - ym) ** 2 for y in ys)
-    if sxx == 0 or syy == 0:
-        return None
-    sxy = sum((x - xm) * (y - ym) for x, y in zip(xs, ys))
-    b = sxy / sxx
-    return ym - b * xm, b, sxy**2 / (sxx * syy)
+    return ajuste_logaritmico(validos)
 
 
 def fecha_de_comparacion(fechas: list[date], hoy: date, dias: int) -> Optional[date]:

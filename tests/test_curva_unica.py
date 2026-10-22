@@ -13,7 +13,7 @@ def _inst(ticker, tipo, subtipo, dias, moneda="ARS"):
 
 
 def _cot(tir, stale=False):
-    return SimpleNamespace(tir=tir, fecha=HOY, precio_stale=stale)
+    return SimpleNamespace(tir=tir, fecha=HOY, precio_stale=stale, duration=None)
 
 
 def test_clasifica_por_familia_y_unidad_de_la_tir():

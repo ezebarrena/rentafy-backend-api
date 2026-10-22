@@ -5,14 +5,12 @@ from collections import defaultdict
 from datetime import date, timedelta
 from typing import Optional
 
-import threading
-import time
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import curvas_macro, evolucion_curva, rendimientos
+from ..cache_ttl import CacheTTL
 from ..deps import get_db_financiera
 from ..deps import require_pro
 from ..financial_utils import NOMBRE_REM_INFLACION
@@ -31,7 +29,8 @@ from ..schemas import (
 )
 from ..serializers import ultimas_cotizaciones
 from .rendimiento import _precios_y_flujos, _ultima_fecha
-from .instrumentos import _ajustar_curva, _curva_label, _curva_orden_key, _puntos_curva_unica, _ultima_inflacion_mensual
+from ..regresion_curva import ajustar_curva
+from .instrumentos import _curva_label, _curva_orden_key, _puntos_curva_unica, _ultima_inflacion_mensual
 
 router = APIRouter(prefix="/curvas-macro", tags=["curvas-macro"], dependencies=[Depends(require_pro)])
 
@@ -68,7 +67,7 @@ def inflacion_equilibrio(db: Session = Depends(get_db_financiera)):
     puntos = _puntos_curva_unica(instrumentos, cotizaciones, "ARS")
     fijas = [(float(p.plazoDias), p.tir) for p in puntos if p.familia == "fija"]
     cer = [p for p in puntos if p.familia == "cer"]
-    ajuste = _ajustar_curva(fijas) if len(fijas) >= 4 else None
+    ajuste = ajustar_curva(fijas) if len(fijas) >= 4 else None
     bonos = []
     if ajuste is not None:
         a, b, r2 = ajuste
@@ -188,9 +187,7 @@ def sensibilidad_riesgo_pais(db: Session = Depends(get_db_financiera)):
 # --- Rendimiento de un grupo de instrumentos (pestaña "Instrumentos" de Analítica) ---------------------------------------------------------------
 VENTANAS_GRUPO = {"7d": 7, "14d": 14, "1m": 30, "3m": 90}
 MAX_GANADORES = 10
-_cache_grupo: dict[tuple[str, str], tuple[float, dict]] = {}
-_lock_grupo = threading.Lock()
-CACHE_GRUPO_SEGUNDOS = 600
+_cache_grupo = CacheTTL(600)  # por (grupo, ventana)
 
 
 def serie_mediana_del_grupo(precios: dict, pagos: dict, inicio: date, fin: date) -> list[dict]:
@@ -221,10 +218,9 @@ def grupo_rendimiento(
     if ventana not in VENTANAS_GRUPO:
         raise HTTPException(400, f"Ventana inválida «{ventana}»: usá {', '.join(VENTANAS_GRUPO)}")
     clave = (grupo, ventana)
-    with _lock_grupo:
-        guardado = _cache_grupo.get(clave)
-        if guardado and time.time() - guardado[0] < CACHE_GRUPO_SEGUNDOS:
-            return guardado[1]
+    guardado = _cache_grupo.obtener(clave)
+    if guardado is not None:
+        return guardado
     instrumentos = {i.ticker: i for i in db.query(Instrumento).filter(Instrumento.activo.is_(True)) if (i.subtipo or i.tipo) == grupo}
     if not instrumentos:
         raise HTTPException(404, f"No hay instrumentos del grupo «{grupo}»")
@@ -250,23 +246,22 @@ def grupo_rendimiento(
         "ganadores": filas[:k],
         "perdedores": list(reversed(filas[len(filas) - k:])) if k else [],
     }
-    with _lock_grupo:
-        _cache_grupo[clave] = (time.time(), resultado)
+    _cache_grupo.guardar(resultado, clave)
     return resultado
 
 
 # Una rueda "completa" tiene TIR para al menos esta cantidad de instrumentos; antes de la carga masiva de TIR externa había ruedas con unos pocos datos sueltos.
 RUEDA_COMPLETA_MIN_TIR = 30
-_cache_evolucion: dict = {"hasta": 0.0, "datos": None}
+_cache_evolucion = CacheTTL(1800)
 
 
 @router.get("/evolucion-curva")
 def evolucion_de_la_curva(db: Session = Depends(get_db_financiera)):
     """Cómo estaba la curva de cada grupo (TIR contra duration) hoy, hace una semana y hace un mes, y si se empinó o se aplanó (ver evolucion_curva.py). Solo
     con las ruedas que tienen TIR cargada para suficientes instrumentos; si no hay datos tan atrás, esa comparación no aparece."""
-    with _lock_grupo:
-        if _cache_evolucion["datos"] is not None and time.time() < _cache_evolucion["hasta"]:
-            return _cache_evolucion["datos"]
+    guardado = _cache_evolucion.obtener()
+    if guardado is not None:
+        return guardado
     filas = (
         db.query(Cotizacion.fecha, func.count(Cotizacion.tir))
         .filter(Cotizacion.fecha >= date.today() - timedelta(days=75))
@@ -297,6 +292,5 @@ def evolucion_de_la_curva(db: Session = Depends(get_db_financiera)):
             grupos.append({"grupo": _curva_label(tipo, subtipo, moneda), "tipo": tipo, "subtipo": subtipo, "moneda": moneda, **res})
     grupos.sort(key=lambda g: _curva_orden_key(g["grupo"]))
     resultado = {"hoy": hoy.isoformat(), "primeraRueda": fechas[0].isoformat(), "grupos": grupos}
-    with _lock_grupo:
-        _cache_evolucion["datos"], _cache_evolucion["hasta"] = resultado, time.time() + 1800
+    _cache_evolucion.guardar(resultado)
     return resultado

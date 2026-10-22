@@ -34,6 +34,7 @@ from ..schemas import (
     PuntoHistorico,
     PuntoScore,
 )
+from ..regresion_curva import ajustar_curva
 from ..scoring import condicion_scoring_real, pesos_vigentes, score_de_fila
 from .mercado import _inflacion_mensual
 from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
@@ -104,23 +105,6 @@ def _alias_de_busqueda(q: str) -> str:
     m = _ALIAS_BOPREAL.match(q.strip())
     return f"BP{m.group(1)}{m.group(2) or ''}".upper() if m else q
 
-
-def _ajustar_curva(puntos: list[tuple[float, float]]) -> Optional[tuple[float, float, float]]:
-    """Regresión TIR = a + b*ln(duration) por mínimos cuadrados, sin depender de numpy (no es
-    una dependencia del backend) — son un puñado de sumas, no hace falta más que eso."""
-    xs = [math.log(duration) for duration, _ in puntos]
-    ys = [tir for _, tir in puntos]
-    n = len(xs)
-    xbar, ybar = sum(xs) / n, sum(ys) / n
-    sxx = sum((x - xbar) ** 2 for x in xs)
-    syy = sum((y - ybar) ** 2 for y in ys)
-    if sxx == 0 or syy == 0:
-        return None
-    sxy = sum((x - xbar) * (y - ybar) for x, y in zip(xs, ys))
-    b = sxy / sxx
-    a = ybar - b * xbar
-    r2 = (sxy**2) / (sxx * syy)
-    return round(a, 4), round(b, 4), round(r2, 4)
 
 router = APIRouter(prefix="/instrumentos", tags=["instrumentos"])
 
@@ -348,7 +332,7 @@ def _construir_curvas(
         # colapsa a 0.0 exacto (caso real detectado: X30S6, vence en 2 días). Sin este chequeo,
         # ese punto rompía el ajuste de TODO el grupo (y por lo tanto /curvas entero, para
         # cualquier tipo) con un ValueError de math.log — se excluye acá, antes de que llegue a
-        # _ajustar_curva, en vez de solo en el filtro de "candidato a excluir" de más abajo (ese
+        # ajustar_curva, en vez de solo en el filtro de "candidato a excluir" de más abajo (ese
         # filtro corre DESPUÉS del primer ajuste con todos los puntos, ya tarde para evitar el
         # crash).
         if duration_redondeada <= 0:
@@ -365,7 +349,7 @@ def _construir_curvas(
             continue
         # Primera pasada con todos los puntos del grupo, para tener una curva de referencia
         # contra la cual medir el desvío de los candidatos a excluir (duration corta).
-        ajuste_previo = _ajustar_curva([(p.duration, p.tir) for p in todos])
+        ajuste_previo = ajustar_curva([(p.duration, p.tir) for p in todos])
         if ajuste_previo is None:
             continue
         a0, b0, _ = ajuste_previo
@@ -382,7 +366,7 @@ def _construir_curvas(
         if len(puntos) < CURVA_MINIMO_PUNTOS:
             continue
         # Si no hubo exclusiones, este ajuste final coincide exactamente con el previo.
-        ajuste = _ajustar_curva([(p.duration, p.tir) for p in puntos])
+        ajuste = ajustar_curva([(p.duration, p.tir) for p in puntos])
         if ajuste is None:
             continue
         a, b, r2 = ajuste

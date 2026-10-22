@@ -1,8 +1,6 @@
 """Rendimiento de los instrumentos: por tipo de activo (home) y de los favoritos del usuario contra la inflación, el dólar y el
 plazo fijo. Cálculo en rendimientos.py; series de referencia en referencias.py. Es información histórica, no una proyección."""
 
-import threading
-import time
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 
@@ -11,15 +9,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import referencias, rendimientos
+from ..cache_ttl import CacheTTL
 from ..deps import get_db_financiera, require_pro
 from ..models_financiera import Cotizacion, FlujoFondo, Instrumento
 from ..models_no_financiera import Usuario
 
 router = APIRouter(tags=["rendimiento"])
 
-CACHE_SEGUNDOS = 600
-_cache: dict[str, tuple[float, dict]] = {}
-_lock = threading.Lock()
+_cache = CacheTTL(600)  # por ventana
 
 
 def _dias(ventana: str) -> int:
@@ -57,10 +54,9 @@ def rendimiento_por_tipo(ventana: str = Query("14d"), db: Session = Depends(get_
     """Mediana del rendimiento total de cada tipo de activo en la ventana (cada instrumento en SU moneda: los bonos y las ON en
     dólares se miden en dólares). Solo cuentan instrumentos con historia suficiente y sin datos dudosos."""
     dias = _dias(ventana)
-    with _lock:
-        guardado = _cache.get(ventana)
-        if guardado and time.time() - guardado[0] < CACHE_SEGUNDOS:
-            return guardado[1]
+    guardado = _cache.obtener(ventana)
+    if guardado is not None:
+        return guardado
 
     fin = _ultima_fecha(db)
     if fin is None:
@@ -108,8 +104,7 @@ def rendimiento_por_tipo(ventana: str = Query("14d"), db: Session = Depends(get_
     ]
     tipos.sort(key=lambda t: (t["mediana"] is None, -(t["mediana"] or 0)))
     resultado = {"ventana": ventana, "dias": dias, "desde": inicio.isoformat(), "hasta": fin.isoformat(), "tipos": tipos}
-    with _lock:
-        _cache[ventana] = (time.time(), resultado)
+    _cache.guardar(resultado, ventana)
     return resultado
 
 
