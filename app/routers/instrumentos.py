@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..financial_utils import NOMBRE_REM_INFLACION, obtener_rem_inflacion
@@ -123,6 +123,11 @@ _DIAS_CORTO_MAXIMO = 365
 _DIAS_MEDIANO_MAXIMO = 365 * 3
 
 
+def _lista(valor: str) -> list[str]:
+    """Un filtro puede traer varios valores separados por coma (ej. tipo=LECAP,BONCAP): los enlaces de los menús agrupan tipos que van juntos."""
+    return [v.strip() for v in valor.split(",") if v.strip()]
+
+
 @router.get("", response_model=PaginatedInstrumentos)
 def listar_instrumentos(
     db: Session = Depends(get_db_financiera),
@@ -130,7 +135,7 @@ def listar_instrumentos(
     plazo: PlazoInversion = Query("mediano"),
     tipo: Optional[str] = None,
     subtipo: Optional[str] = None,
-    familia: Optional[str] = Query(None, pattern="^[A-Za-z]{1,4}$", description="Familia de bono por las primeras letras del ticker (GD, AL, AO…): el mismo prefijo del ticker"),
+    familia: Optional[str] = Query(None, pattern="^[A-Za-z]{1,4}(,[A-Za-z]{1,4})*$", description="Familia de bono por las primeras letras del ticker (GD, AL, AO…): el mismo prefijo del ticker; varias separadas por coma"),
     moneda: Optional[str] = None,
     riesgo: Optional[str] = None,
     liquidez: Optional[str] = None,
@@ -180,11 +185,11 @@ def listar_instrumentos(
     # batch de Scoring, no antes.
     query = db.query(Instrumento).filter(Instrumento.activo.is_(True))
     if tipo and tipo != "TODOS":
-        query = query.filter(Instrumento.tipo == tipo)
+        query = query.filter(Instrumento.tipo.in_(_lista(tipo)))
     if subtipo and subtipo != "TODOS":
-        query = query.filter(Instrumento.subtipo == subtipo)
+        query = query.filter(Instrumento.subtipo.in_(_lista(subtipo)))
     if familia:
-        query = query.filter(Instrumento.ticker.like(f"{familia.upper()}%"))
+        query = query.filter(or_(*[Instrumento.ticker.like(f"{f.upper()}%") for f in _lista(familia)]))
     if moneda:
         query = query.filter(Instrumento.moneda == moneda)
     if liquidez and liquidez != "TODOS":
@@ -282,9 +287,9 @@ def emisores_disponibles(
     emisor que daría una lista vacía con los otros filtros elegidos."""
     consulta = db.query(Instrumento.emisor).filter(Instrumento.activo.is_(True))
     if tipo:
-        consulta = consulta.filter(Instrumento.tipo == tipo)
+        consulta = consulta.filter(Instrumento.tipo.in_(_lista(tipo)))
     if subtipo:
-        consulta = consulta.filter(Instrumento.subtipo == subtipo)
+        consulta = consulta.filter(Instrumento.subtipo.in_(_lista(subtipo)))
     if moneda:
         consulta = consulta.filter(Instrumento.moneda == moneda)
     filas = consulta.distinct().order_by(Instrumento.emisor).all()
@@ -299,7 +304,7 @@ def subtipos_disponibles(db: Session = Depends(get_db_financiera), tipo: Optiona
     supuesto acá — se filtra por lo que realmente haya en el catálogo."""
     query = db.query(Instrumento.subtipo).filter(Instrumento.activo.is_(True), Instrumento.subtipo.isnot(None))
     if tipo and tipo != "TODOS":
-        query = query.filter(Instrumento.tipo == tipo)
+        query = query.filter(Instrumento.tipo.in_(_lista(tipo)))
     filas = query.distinct().order_by(Instrumento.subtipo).all()
     return [fila[0] for fila in filas]
 
