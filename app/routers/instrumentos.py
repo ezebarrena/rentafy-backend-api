@@ -145,6 +145,13 @@ def listar_instrumentos(
             "y otros usos que sí quieren ver vencidos simplemente no mandan este parámetro."
         ),
     ),
+    ocultar_ccl: bool = Query(
+        False,
+        description=(
+            "Saca los instrumentos en dólares cuyo ticker termina en C (dólar cable / CCL, ej. AL30C): es la preferencia «Activos» del perfil. "
+            "Los de dólar MEP (D) y los de pesos no se tocan."
+        ),
+    ),
     emisor: Optional[str] = None,
     tir_min: Optional[float] = None,
     tir_max: Optional[float] = None,
@@ -185,6 +192,8 @@ def listar_instrumentos(
     hoy = date.today()
     if excluir_vencidos:
         query = query.filter(Instrumento.vencimiento >= hoy)
+    if ocultar_ccl:
+        query = query.filter(~((Instrumento.moneda == "USD") & Instrumento.ticker.like("%C")))
     if plazo_vencimiento:
         corte_corto = hoy + timedelta(days=_DIAS_CORTO_MAXIMO)
         corte_mediano = hoy + timedelta(days=_DIAS_MEDIANO_MAXIMO)

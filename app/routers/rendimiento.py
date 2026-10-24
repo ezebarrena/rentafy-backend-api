@@ -118,8 +118,9 @@ def rendimiento_favoritos(
     ventana=desde), contra la inflación (UVA), el dólar MEP y un plazo fijo del mismo período. Los instrumentos en dólares se
     pasan a pesos con el MEP de cada fecha, para que sean comparables con la inflación."""
     desde_alta = ventana == "desde"
-    dias = None if desde_alta else _dias(ventana)
     fin = _ultima_fecha(db)
+    # "mes" = lo que va del mes en curso: desde el último día del mes anterior hasta la última rueda.
+    dias = None if desde_alta else (fin.day if ventana == "mes" and fin else _dias("1m" if ventana == "mes" else ventana))
     favoritos = {f.instrumento_ticker: f.creado_en.date() for f in usuario.favoritos}
     vacio = {"ventana": ventana, "desde": None, "hasta": fin.isoformat() if fin else None, "instrumentos": [], "cartera": None, "referencias": []}
     if fin is None or not favoritos:
@@ -173,3 +174,57 @@ def rendimiento_favoritos(
         "cartera": {"retorno": promedio(retornos), "n": len(retornos)},
         "referencias": referencias_out,
     }
+
+
+MESES_GRAFICO = 6
+
+
+@router.get("/watchlist/rendimiento-mensual")
+def rendimiento_favoritos_mensual(
+    usuario: Usuario = Depends(require_pro),
+    db: Session = Depends(get_db_financiera),
+):
+    """Mes por mes (los últimos MESES_GRAFICO, el actual hasta la última rueda), cuánto rindieron EN PESOS los favoritos actuales del
+    usuario (promedio simple, sin importar cuándo se agregaron) contra la inflación (UVA), el dólar MEP y un plazo fijo del mismo mes."""
+    fin = _ultima_fecha(db)
+    tickers = [f.instrumento_ticker for f in usuario.favoritos]
+    if fin is None or not tickers:
+        return {"meses": []}
+
+    # Cada mes va del último día del anterior al último día del mes (o a `fin`, el mes en curso).
+    tramos = []
+    for k in range(MESES_GRAFICO - 1, -1, -1):
+        mes, anio = fin.month - k, fin.year
+        while mes < 1:
+            mes, anio = mes + 12, anio - 1
+        primero = date(anio, mes, 1)
+        siguiente = date(anio + (mes == 12), mes % 12 + 1, 1)
+        tramos.append((primero, primero - timedelta(days=1), min(siguiente - timedelta(days=1), fin)))
+
+    referencias.asegurar(db)
+    arranque = tramos[0][1]
+    nombres = {i.ticker: i for i in db.query(Instrumento).filter(Instrumento.ticker.in_(tickers))}
+    precios, pagos = _precios_y_flujos(db, tickers, arranque - timedelta(days=15), fin)
+    uva, mep, tasa = (referencias.cargar(db, n, arranque) for n in ("uva", "mep", "tasa_pf"))
+
+    meses = []
+    for primero, inicio, final in tramos:
+        retornos = []
+        for ticker, inst in nombres.items():
+            r = rendimientos.calcular(
+                precios.get(ticker, []), pagos.get(ticker, []), inicio, final, mep=mep if inst.moneda == "USD" else None
+            )
+            if r.estado == "ok":
+                retornos.append(r.retorno)
+        meses.append(
+            {
+                "mes": primero.strftime("%Y-%m"),
+                "hasta": final.isoformat(),
+                "activos": sum(retornos) / len(retornos) if retornos else None,
+                "n": len(retornos),
+                "inflacion": referencias.variacion(uva, inicio, final),
+                "mep": referencias.variacion(mep, inicio, final),
+                "plazoFijo": referencias.rendimiento_plazo_fijo(tasa, inicio, final),
+            }
+        )
+    return {"meses": meses}
