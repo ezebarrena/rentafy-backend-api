@@ -75,7 +75,7 @@ _CURVA_LABELS = {
 
 # Orden fijo de las pestañas/pills en el frontend (no alfabético): los grupos más consultados
 # primero. Cualquier grupo no listado acá cae al final, ordenado alfabéticamente entre sí.
-_CURVA_ORDEN = ["Bonos USD", "BONCER", "Obligaciones Negociables", "LECAP", "BONCAP"]
+_CURVA_ORDEN = ["Bonos USD", "BONCER", "Obligaciones Negociables", "Letras", "LECAP", "BONCAP"]
 
 
 def _curva_label(tipo: str, subtipo: Optional[str], moneda: str) -> str:
@@ -440,6 +440,17 @@ def curvas_rendimiento(db: Session = Depends(get_db_financiera)):
     instrumentos = db.query(Instrumento).filter(Instrumento.activo.is_(True), Instrumento.vencimiento >= date.today()).all()
     cotizaciones = ultimas_cotizaciones(db, [i.ticker for i in instrumentos])
     resultado = list(_construir_curvas(instrumentos, cotizaciones).values())
+    # LECAP y BONCAP son ambas letras a tasa fija en pesos y cada una tiene pocos instrumentos: además de sus curvas, una curva "Letras" con todas juntas.
+    curvas_letras = [c for c in resultado if c.tipo in ("LECAP", "BONCAP")]
+    if len(curvas_letras) == 2:
+        puntos = sorted((p for c in curvas_letras for p in c.puntos), key=lambda p: p.duration)
+        ajuste = ajustar_curva([(p.duration, p.tir) for p in puntos])
+        if ajuste is not None:
+            a, b, r2 = ajuste
+            resultado.append(CurvaRendimiento(
+                tipo="LECAP", subtipo=None, moneda="ARS", label="Letras", puntos=puntos, a=a, b=b, r2=r2,
+                excluidos=sorted((p for c in curvas_letras for p in c.excluidos), key=lambda p: p.duration),
+            ))
     # Agregar curva de cauciones al final si existe.
     curva_cauciones = _curva_cauciones(db)
     if curva_cauciones:
