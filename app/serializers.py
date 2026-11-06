@@ -8,7 +8,7 @@ componente separado (el Servicio de IA, fuera del alcance de este backend)."""
 
 from datetime import date, timedelta
 
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from .models_financiera import Cotizacion, Instrumento, Scoring
@@ -24,6 +24,7 @@ from .schemas import (
     PlazoInversion,
     VariacionPeriodo,
 )
+from .cache_ttl import CacheTTL
 from .lectura_perfil import armar_lectura, armar_retorno_esperado, restricciones_operativas
 from .resumen_texto import resumen_completo, resumen_corto
 from .scoring import ajuste_para, condicion_scoring_real, es_scoring_real, score_base, score_de_fila
@@ -154,6 +155,25 @@ def _lectura_perfil(
     return armar_lectura(base, ajuste, factores, perfil, plazo, retorno, restricciones)
 
 
+# "Nuevo": primera cotización dentro de esta ventana. Solo cuenta si la base ya tenía historia más vieja que el doble de la ventana (si no, en una base recién armada todo sería nuevo).
+VENTANA_NUEVO_DIAS = 14
+_NUEVOS = CacheTTL(1800)
+
+
+def tickers_nuevos(db: Session) -> frozenset[str]:
+    """Tickers cuya primera Cotizacion es de los últimos VENTANA_NUEVO_DIAS días (en memoria 30 min: es una agrupación sobre toda la historia)."""
+
+    def calcular() -> frozenset[str]:
+        filas = db.query(Cotizacion.instrumento_ticker, func.min(Cotizacion.fecha)).group_by(Cotizacion.instrumento_ticker).all()
+        hoy = date.today()
+        if not filas or min(f for _, f in filas) > hoy - timedelta(days=2 * VENTANA_NUEVO_DIAS):
+            return frozenset()
+        corte = hoy - timedelta(days=VENTANA_NUEVO_DIAS)
+        return frozenset(t for t, f in filas if f >= corte)
+
+    return _NUEVOS.obtener_o_calcular(calcular)
+
+
 def to_list_item(
     instrumento: Instrumento,
     perfil: PerfilInversor,
@@ -161,6 +181,7 @@ def to_list_item(
     cot: Cotizacion | None = None,
     sc: Scoring | None = None,
     pesos_base: dict[PerfilInversor, PesosPerfil] | None = None,
+    nuevos: frozenset[str] = frozenset(),
 ) -> InstrumentoListItem | None:
     """`cot`/`sc`: si el llamador ya los resolvió en batch (ver `ultimas_cotizaciones`/
     `ultimos_scoring`, para listados de muchos instrumentos), se usan tal cual — si no, cae
@@ -189,6 +210,7 @@ def to_list_item(
         liquidez=instrumento.liquidez,
         resumen=resumen_corto(instrumento.resumen),
         score=_score(sc, perfil, plazo, pesos_base, instrumento),
+        nuevo=instrumento.ticker in nuevos,
     )
 
 

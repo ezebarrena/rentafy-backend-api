@@ -37,7 +37,7 @@ from ..schemas import (
 from ..regresion_curva import ajustar_curva
 from ..scoring import condicion_scoring_real, pesos_vigentes, score_de_fila
 from .mercado import _inflacion_mensual
-from ..serializers import to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
+from ..serializers import tickers_nuevos, to_detail, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 DIAS_SCORING_HISTORICO = 20
 # Tope de lo que puede pedir el gráfico del Score (rangos 1S a Todo): alcanza para más de un año de ruedas.
@@ -224,10 +224,11 @@ def listar_instrumentos(
     cotizaciones = ultimas_cotizaciones(db, tickers)
     scorings = ultimos_scoring(db, tickers)
     pesos_base = pesos_vigentes(db)
+    nuevos = tickers_nuevos(db)
     items = [
         item
         for item in (
-            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker), pesos_base=pesos_base)
+            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker), pesos_base=pesos_base, nuevos=nuevos)
             for i in instrumentos
         )
         if item is not None

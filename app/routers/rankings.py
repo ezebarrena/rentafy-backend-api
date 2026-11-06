@@ -13,7 +13,7 @@ from ..deps import get_db_financiera, solicitante_es_admin
 from ..models_financiera import Instrumento, Modelo
 from ..schemas import PaginatedInstrumentos, PerfilInversor, PlazoInversion, ScoreRentafyPesosOut
 from ..scoring import pesos_vigentes
-from ..serializers import to_list_item, ultimas_cotizaciones, ultimos_scoring
+from ..serializers import tickers_nuevos, to_list_item, ultimas_cotizaciones, ultimos_scoring
 
 router = APIRouter(tags=["rankings"])
 
@@ -37,10 +37,11 @@ def ranking(
     cotizaciones = ultimas_cotizaciones(db, tickers)
     scorings = ultimos_scoring(db, tickers)
     pesos_base = pesos_vigentes(db)
+    nuevos = tickers_nuevos(db)
     items = [
         item
         for item in (
-            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker), pesos_base=pesos_base)
+            to_list_item(i, perfil, plazo, cot=cotizaciones.get(i.ticker), sc=scorings.get(i.ticker), pesos_base=pesos_base, nuevos=nuevos)
             for i in instrumentos
         )
         if item is not None

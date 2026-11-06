@@ -179,6 +179,8 @@ class InstrumentoListItem(BaseModel):
     liquidez: NivelLiquidez
     resumen: str = ""
     score: Optional[float] = None
+    # Apareció hace poco en la fuente (primera cotización dentro de la ventana de serializers.VENTANA_NUEVO_DIAS).
+    nuevo: bool = False
 
 
 class PaginatedInstrumentos(BaseModel):
