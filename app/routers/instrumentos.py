@@ -875,4 +875,5 @@ def detalle_instrumento(
     detalle = to_detail(instrumento, perfil, plazo, rem_inflacion_12m, pesos_vigentes(db))
     if detalle is None:
         raise HTTPException(409, f"El instrumento «{ticker}» todavía no tiene una cotización cargada")
+    detalle.nuevo = instrumento.ticker in tickers_nuevos(db)
     return detalle

@@ -77,6 +77,7 @@ class VariacionPeriodo(BaseModel):
 
 
 class InstrumentoOut(BaseModel):
+    nuevo: bool = False  # ver serializers.tickers_nuevos
     ticker: str
     nombre: str
     tipo: TipoInstrumento
