@@ -66,8 +66,13 @@ CURVA_DURATION_MINIMA = 0.15
 # ruido de tramo corto nomás. Con esto se distingue ese caso de una LECAP corta que sí sigue la
 # tendencia (desvío chico) y no debería perderse del ajuste.
 CURVA_RESIDUO_MINIMO = 1.5
-# Instrumentos que se sacan siempre del ajuste de la curva (quedan listados como "excluidos" debajo del gráfico): GD46 vence en 2046 y, con ~18 años de duration, estira el eje y aplasta al resto del grupo.
-CURVA_TICKERS_EXCLUIDOS = {"GD46"}
+# Bonos que se sacan siempre del ajuste de la curva (quedan listados como "excluidos" debajo del gráfico): GD46 vence en 2046 y, con ~19 años de duration, estira el eje y aplasta al resto del grupo.
+# Se nombran sin el sufijo de la plaza (C = cable, D = MEP): GD46, GD46C y GD46D son el mismo bono.
+CURVA_BONOS_EXCLUIDOS = {"GD46"}
+
+
+def _bono_excluido_de_curva(ticker: str) -> bool:
+    return ticker in CURVA_BONOS_EXCLUIDOS or (ticker[-1:] in ("C", "D") and ticker[:-1] in CURVA_BONOS_EXCLUIDOS)
 
 _CURVA_LABELS = {
     "ON": "Obligaciones Negociables",
@@ -375,7 +380,7 @@ def _construir_curvas(
         for p in todos:
             candidato = p.duration < CURVA_DURATION_MINIMA
             desvio = abs(p.tir - (a0 + b0 * math.log(p.duration)))
-            if p.ticker in CURVA_TICKERS_EXCLUIDOS or (candidato and desvio > CURVA_RESIDUO_MINIMO):
+            if _bono_excluido_de_curva(p.ticker) or (candidato and desvio > CURVA_RESIDUO_MINIMO):
                 excluidos.append(p)
             else:
                 puntos.append(p)
